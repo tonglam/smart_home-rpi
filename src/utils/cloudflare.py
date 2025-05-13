@@ -1,10 +1,8 @@
-"""Cloudflare R2 utilities for file storage."""
-
 import os
-from datetime import datetime
 
 import boto3
-from botocore.exceptions import ClientError, NoCredentialsError, PartialCredentialsError
+
+from src.utils.logger import logger
 
 CLOUDFLARE_ACCOUNT_ID = os.getenv("CLOUDFLARE_ACCOUNT_ID")
 R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
@@ -28,7 +26,7 @@ def get_r2_client():
 def upload_file_to_r2(local_file_path: str, remote_file_name: str = None) -> bool:
     """Upload a file to Cloudflare R2 storage."""
     if not os.path.exists(local_file_path):
-        print(f"[Cloudflare] File not found: {local_file_path}")
+        logger.error(f"[Cloudflare] File not found: {local_file_path}")
         return False
 
     try:
@@ -40,11 +38,11 @@ def upload_file_to_r2(local_file_path: str, remote_file_name: str = None) -> boo
 
         client.upload_file(local_file_path, bucket_name, remote_file_name)
 
-        print(
+        logger.info(
             f"[Cloudflare] Successfully uploaded {local_file_path} to R2 as {remote_file_name}"
         )
         return True
 
     except Exception as e:
-        print(f"[Cloudflare] Error uploading file to R2: {str(e)}")
+        logger.error(f"[Cloudflare] Error uploading file to R2: {str(e)}")
         return False

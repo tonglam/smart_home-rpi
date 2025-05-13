@@ -1,55 +1,46 @@
 # Smart Home RPi
 
-A Raspberry Pi-based smart home monitoring system with sensors for sound, motion, and door status.
+A Raspberry Pi-based smart home monitoring system with sensors for sound, door (reed switch), and camera, featuring MQTT integration and cloud connectivity.
 
-## Project Structure
+## Quick Start
 
-```
-smart_home-rpi/
-├── src/                    # Source code
-│   ├── __init__.py
-│   ├── sensors/           # Sensor-specific modules
-│   │   ├── __init__.py
-│   │   ├── camera.py
-│   │   ├── reed.py
-│   │   └── sound.py
-│   ├── utils/            # Utility modules
-│   │   ├── __init__.py
-│   │   ├── cloudflare.py
-│   │   ├── database.py
-│   │   └── mqtt.py
-│   └── main.py           # Application entry point
-├── tests/                # Test files
-│   ├── __init__.py
-│   ├── test_database.py
-│   ├── test_mqtt.py
-│   └── test_r2_upload.py
-├── .env.example         # Example environment variables
-├── .gitignore          # Git ignore file
-├── LICENSE             # License file
-├── README.md           # Project documentation
-└── requirements.txt    # Project dependencies
-```
+1. **Clone the repository**
+2. **Create a virtual environment**
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate
+   ```
+3. **Install dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
+4. **Configure environment**
+   - Copy `.env.example` to `.env` and fill in your MQTT and Supabase credentials.
+5. **Run the application**
+   ```bash
+   python src/main.py
+   ```
 
-## Setup
+## Deployment (as a Service)
 
-1. Clone the repository
-2. Create a virtual environment: `python -m venv .venv`
-3. Activate the virtual environment:
-   - Windows: `.venv\Scripts\activate`
-   - Unix/MacOS: `source .venv/bin/activate`
-4. Install dependencies: `pip install -r requirements.txt`
-5. Copy `.env.example` to `.env` and fill in your configuration
-6. Run the application: `python src/main.py`
+- See [DEPLOYMENT.md](DEPLOYMENT.md) for running this app as a systemd service on Raspberry Pi OS.
+- The service will auto-start on boot and auto-restart on crash.
 
 ## Testing
 
-Run tests with pytest:
+Run all tests with:
 
 ```bash
 pytest tests/
 ```
 
+## Project Structure
+
+- `src/` — Main source code (sensors, utils, main entry)
+- `tests/` — Test suite
+- `.env.example` — Example environment config
+- `requirements.txt` — Python dependencies
+
 ## License
 
-See [LICENSE](LICENSE) file for details.
+See [LICENSE](LICENSE) for details.

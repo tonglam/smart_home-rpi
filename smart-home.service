@@ -1,0 +1,14 @@
+[Unit]
+Description=Smart Home RPi Service
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/smart_home-rpi
+ExecStart=/home/pi/smart_home-rpi/start_smart_home.sh
+Restart=on-failure
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target 

@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from src.utils.database import get_device_by_id, supabase
+from src.utils.database import get_device_by_id, get_supabase_client
 
 
 @pytest.fixture(scope="module")
@@ -12,16 +12,22 @@ def check_env_vars():
         pytest.skip("SUPABASE_URL or SUPABASE_KEY environment variables are not set")
 
 
-def test_get_nonexistent_device(check_env_vars):
+def test_get_nonexistent_device():
     """Test fetching a non-existent device."""
     test_device_id_non_existent = "device_id_that_does_not_exist_12345"
     device_info = get_device_by_id(test_device_id_non_existent)
     assert device_info is None or (isinstance(device_info, dict) and not device_info)
 
 
-def test_database_connection(check_env_vars):
+def test_database_connection():
     """Test basic database connectivity."""
-    response = supabase.table("devices").select("id", count="exact").limit(0).execute()
+    response = (
+        get_supabase_client()
+        .table("devices")
+        .select("id", count="exact")
+        .limit(0)
+        .execute()
+    )
     assert hasattr(response, "data")
     assert isinstance(response.data, list)
     assert hasattr(response, "count")
@@ -86,7 +92,11 @@ def run_db_test():
         # the connection and table access is implicitly tested.
         # For a more direct test of SELECT ability without relying on specific data:
         response = (
-            supabase.table("devices").select("id", count="exact").limit(0).execute()
+            get_supabase_client()
+            .table("devices")
+            .select("id", count="exact")
+            .limit(0)
+            .execute()
         )
 
         # The response for a count query typically looks like: APIResponse(data=[], count=X, status_code=200)

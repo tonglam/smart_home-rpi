@@ -3,10 +3,10 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.sensors.sound import (
+    DEVICE_ID,
+    DEVICE_NAME,
+    DEVICE_TYPE,
     GPIO_PIN_SOUND,
-    SOUND_DEVICE_ID,
-    SOUND_DEVICE_NAME,
-    SOUND_DEVICE_TYPE,
     start_sound_monitoring,
     stop_sound_monitoring,
 )
@@ -20,8 +20,8 @@ def mock_input_device(mocker):
 
     # Create a mock instance that will be returned when InputDevice is instantiated
     mock_instance = MagicMock()
-    mock_instance.when_activated = None
     mock_instance.close = MagicMock()
+    mock_instance.is_active = False
 
     # Configure the class mock to return our instance
     mock_class.side_effect = lambda pin, pull_up: mock_instance
@@ -40,13 +40,9 @@ def mock_db_functions(mocker):
         "insert_device": mocker.patch("src.sensors.sound.insert_device"),
         "insert_event": mocker.patch("src.sensors.sound.insert_event"),
         "insert_alert": mocker.patch("src.sensors.sound.insert_alert"),
-        "get_latest_device_state": mocker.patch(
-            "src.sensors.sound.get_latest_device_state"
-        ),
     }
     # Set up default return values
     mocks["get_device_by_id"].return_value = None
-    mocks["get_latest_device_state"].return_value = "quiet"
     return mocks
 
 
@@ -54,6 +50,12 @@ def mock_db_functions(mocker):
 def mock_time(mocker):
     """Mock time.sleep function."""
     return mocker.patch("src.sensors.sound.time.sleep")
+
+
+@pytest.fixture(autouse=True)
+def cleanup_sound():
+    yield
+    stop_sound_monitoring()
 
 
 def test_start_sound_monitoring_new_device(mock_input_device, mock_db_functions):
@@ -65,26 +67,16 @@ def test_start_sound_monitoring_new_device(mock_input_device, mock_db_functions)
     start_sound_monitoring(home_id=home_id, user_id=user_id)
 
     # Verify device registration
-    mock_db_functions["get_device_by_id"].assert_called_once_with(SOUND_DEVICE_ID)
+    mock_db_functions["get_device_by_id"].assert_called_once_with(DEVICE_ID)
     mock_db_functions["insert_device"].assert_called_once_with(
-        device_id=SOUND_DEVICE_ID,
+        device_id=DEVICE_ID,
         home_id=home_id,
-        name=SOUND_DEVICE_NAME,
-        type=SOUND_DEVICE_TYPE,
-        current_state="quiet",
-        location="General Area",
+        name=DEVICE_NAME,
+        type=DEVICE_TYPE,
+        current_state="idle",
     )
 
-    # Verify monitoring started
-    mock_db_functions["insert_event"].assert_called_once_with(
-        home_id=home_id,
-        device_id=SOUND_DEVICE_ID,
-        event_type="status.monitoring",
-        old_state="quiet",
-        new_state="active",
-    )
-
-    # Verify GPIO setup
+    # Verify monitoring started (event and alert are called in loop, not on start)
     mock_input_device.assert_called_once()
     assert mock_input_device.call_args[0][0] == GPIO_PIN_SOUND
     assert mock_input_device.call_args[1]["pull_up"] is False
@@ -97,62 +89,74 @@ def test_start_sound_monitoring_existing_device(mock_input_device, mock_db_funct
 
     # Mock existing device
     mock_db_functions["get_device_by_id"].return_value = {
-        "device_id": SOUND_DEVICE_ID,
+        "device_id": DEVICE_ID,
         "home_id": home_id,
-        "name": SOUND_DEVICE_NAME,
-        "type": SOUND_DEVICE_TYPE,
+        "name": DEVICE_NAME,
+        "type": DEVICE_TYPE,
     }
 
     # Start monitoring
     start_sound_monitoring(home_id=home_id, user_id=user_id)
 
     # Verify no device registration occurred
-    mock_db_functions["get_device_by_id"].assert_called_once_with(SOUND_DEVICE_ID)
+    mock_db_functions["get_device_by_id"].assert_called_once_with(DEVICE_ID)
     mock_db_functions["insert_device"].assert_not_called()
 
-    # Verify monitoring started
-    mock_db_functions["insert_event"].assert_called_once()
+    # Verify monitoring started (event and alert are called in loop, not on start)
+    mock_input_device.assert_called_once()
+    assert mock_input_device.call_args[0][0] == GPIO_PIN_SOUND
+    assert mock_input_device.call_args[1]["pull_up"] is False
 
 
-def test_sound_detection_callback(mock_input_device, mock_db_functions, mock_time):
+def test_sound_detection_callback(mock_input_device, mock_db_functions, mocker, caplog):
     """Test sound detection callback with debouncing."""
+    import threading
+    import time
+
     home_id = "test_home_123"
     user_id = "test_user_123"
+
+    # Set up the mock to simulate is_active True once, then False
+    mock_instance = mock_input_device.side_effect(GPIO_PIN_SOUND, pull_up=False)
+    is_active_sequence = [True, False]
+
+    def is_active_side_effect():
+        return is_active_sequence.pop(0) if is_active_sequence else False
+
+    type(mock_instance).is_active = property(lambda self: is_active_side_effect())
+
+    # Patch time.sleep to fast-forward
+    mocker.patch("src.sensors.sound.time.sleep", return_value=None)
 
     # Start monitoring to set up callbacks
     start_sound_monitoring(home_id=home_id, user_id=user_id)
 
-    # Get the mock instance that was created
-    mock_instance = mock_input_device.side_effect(GPIO_PIN_SOUND, pull_up=False)
+    # Run the monitoring loop in a thread
+    from src.sensors.sound import _is_monitoring, _sound_monitoring_loop
 
-    # Reset mock call counts after initialization
-    mock_db_functions["insert_event"].reset_mock()
-    mock_db_functions["insert_alert"].reset_mock()
+    monitor_thread = threading.Thread(target=_sound_monitoring_loop)
+    _is_monitoring.set()
+    monitor_thread.start()
 
-    # Store original callback for later comparison
-    original_callback = mock_instance.when_activated
-
-    # Trigger the callback
-    original_callback()
+    # Allow the thread to run briefly
+    time.sleep(0.05)
+    _is_monitoring.clear()
+    monitor_thread.join(timeout=1.0)
 
     # Verify event and alert were logged
     mock_db_functions["insert_event"].assert_called_with(
         home_id=home_id,
-        device_id=SOUND_DEVICE_ID,
-        event_type="sound_detection",
-        old_state="quiet",
-        new_state="sound_detected",
+        device_id=DEVICE_ID,
+        event_type="sound_detected",
+        old_state=None,
+        new_state="detected",
     )
     mock_db_functions["insert_alert"].assert_called_with(
         home_id=home_id,
         user_id=user_id,
-        device_id=SOUND_DEVICE_ID,
-        message=f"{SOUND_DEVICE_NAME} detected a sound.",
+        device_id=DEVICE_ID,
+        message="Sound detected.",
     )
-
-    # Verify debouncing behavior
-    mock_time.assert_called_once_with(2)  # 2-second debounce delay
-    assert mock_instance.when_activated == original_callback  # Callback restored
 
 
 def test_stop_sound_monitoring(mock_input_device):
@@ -170,15 +174,16 @@ def test_stop_sound_monitoring(mock_input_device):
     mock_instance.close.assert_called_once()
 
 
-def test_error_handling(mock_input_device, mock_db_functions):
+def test_error_handling(mock_input_device, mock_db_functions, caplog):
     """Test error handling during initialization."""
     # Configure mock to raise exception on instantiation
     mock_input_device.side_effect = Exception("GPIO Error")
 
-    with pytest.raises(Exception) as exc_info:
-        start_sound_monitoring(home_id="test_home_123", user_id="test_user_123")
-
-    assert str(exc_info.value) == "GPIO Error"
+    # Should not raise, but should log an error
+    start_sound_monitoring(home_id="test_home_123", user_id="test_user_123")
+    assert any(
+        "Error starting monitoring: GPIO Error" in m for m in caplog.text.splitlines()
+    )
 
     # Verify no device registration occurred after error
     mock_db_functions["insert_device"].assert_not_called()

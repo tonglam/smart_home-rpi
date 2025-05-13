@@ -1,113 +1,110 @@
 import sys
+import threading
 import time
 from signal import pause
+from typing import Optional
 
 from gpiozero import InputDevice
 
 from src.utils.database import (
     get_device_by_id,
-    get_latest_device_state,
     insert_alert,
     insert_device,
     insert_event,
 )
+from src.utils.logger import logger
 
-SOUND_DEVICE_ID = "sound_sensor_01"
-SOUND_DEVICE_NAME = "Sound Sensor"
-SOUND_DEVICE_TYPE = "sound_sensor"
+DEVICE_ID = "sound_sensor_01"
+DEVICE_NAME = "Sound Sensor"
+DEVICE_TYPE = "sound_sensor"
 
 GPIO_PIN_SOUND = 21
 
-sound_sensor_device: InputDevice | None = None
+# Global state
+_sound_sensor_device: Optional[InputDevice] = None
+_monitoring_thread: Optional[threading.Thread] = None
+_is_monitoring = threading.Event()
+_current_home_id: Optional[str] = None
+_current_user_id: Optional[str] = None
 
 
-def start_sound_monitoring(home_id: str, user_id: str | None):
-    """Initializes sound sensor and sets up event handlers."""
-    global sound_sensor_device
+def _sound_monitoring_loop():
+    global _sound_sensor_device
+    logger.info(f"[{DEVICE_NAME}] Sound sensor monitoring loop started.")
+    try:
+        while _is_monitoring.is_set():
+            if _sound_sensor_device and _sound_sensor_device.is_active:
+                logger.info(f"[{DEVICE_NAME}] Sound event detected.")
+                insert_event(
+                    home_id=_current_home_id,
+                    device_id=DEVICE_ID,
+                    event_type="sound_detected",
+                    old_state=None,
+                    new_state="detected",
+                )
+                insert_alert(
+                    home_id=_current_home_id,
+                    user_id=_current_user_id,
+                    device_id=DEVICE_ID,
+                    message="Sound detected.",
+                )
+                # Debounce: wait until sound is gone, then a short cooldown
+                while _sound_sensor_device.is_active and _is_monitoring.is_set():
+                    time.sleep(0.05)
+                time.sleep(0.5)
+            else:
+                time.sleep(0.05)
+    except Exception as e:
+        logger.error(f"[{DEVICE_NAME}] Error in monitoring loop: {e}")
+    finally:
+        logger.info(f"[{DEVICE_NAME}] Sound sensor monitoring loop ended.")
+
+
+def start_sound_monitoring(home_id: str, user_id: str) -> None:
+    global _monitoring_thread, _is_monitoring, _current_home_id, _current_user_id, _sound_sensor_device
+
+    logger.info(
+        f"[{DEVICE_NAME}] Starting monitoring for HOME_ID: {home_id}, USER_ID: {user_id}"
+    )
+    _current_home_id = home_id
+    _current_user_id = user_id
 
     try:
-        print(
-            f"[{SOUND_DEVICE_NAME}] Initializing GPIO {GPIO_PIN_SOUND} (Home: {home_id})..."
-        )
-        sound_sensor_device = InputDevice(GPIO_PIN_SOUND, pull_up=False)
+        _sound_sensor_device = InputDevice(GPIO_PIN_SOUND, pull_up=False)
 
-        device = get_device_by_id(SOUND_DEVICE_ID)
+        # Register device if not present
+        device = get_device_by_id(DEVICE_ID)
         if not device:
-            print(
-                f"[{SOUND_DEVICE_NAME}] Device ID {SOUND_DEVICE_ID} not found in DB. Registering..."
-            )
-
+            logger.info(f"[{DEVICE_NAME}] Device not found in DB. Registering...")
             insert_device(
-                device_id=SOUND_DEVICE_ID,
+                device_id=DEVICE_ID,
                 home_id=home_id,
-                name=SOUND_DEVICE_NAME,
-                type=SOUND_DEVICE_TYPE,
-                current_state="quiet",
-                location="General Area",
+                name=DEVICE_NAME,
+                type=DEVICE_TYPE,
+                current_state="idle",
             )
 
-        insert_event(
-            home_id=home_id,
-            device_id=SOUND_DEVICE_ID,
-            event_type="status.monitoring",
-            old_state=get_latest_device_state(home_id, SOUND_DEVICE_ID) or "unknown",
-            new_state="active",
-        )
-
-        def on_sound_detected_callback():
-            print(f"[Sound] Sound detected on GPIO {GPIO_PIN_SOUND}")
-
-            insert_event(
-                home_id=home_id,
-                device_id=SOUND_DEVICE_ID,
-                event_type="sound_detection",
-                old_state="quiet",
-                new_state="sound_detected",
-            )
-
-            insert_alert(
-                home_id=home_id,
-                user_id=user_id,
-                device_id=SOUND_DEVICE_ID,
-                message=f"{SOUND_DEVICE_NAME} detected a sound.",
-            )
-
-            if sound_sensor_device:
-                original_callback = sound_sensor_device.when_activated
-                sound_sensor_device.when_activated = None
-                print("[Sound] Debouncing: Ignoring sound events for 2 seconds...")
-                time.sleep(2)
-                sound_sensor_device.when_activated = original_callback
-                print("[Sound] Debouncing finished. Listening again.")
-
-        sound_sensor_device.when_activated = on_sound_detected_callback
-        print(
-            f"[{SOUND_DEVICE_NAME}] Monitoring started. Event detection is active in the background."
-        )
-
+        # Start monitoring thread
+        _is_monitoring.set()
+        _monitoring_thread = threading.Thread(target=_sound_monitoring_loop)
+        _monitoring_thread.start()
+        logger.info(f"[{DEVICE_NAME}] Monitoring started.")
     except Exception as e:
-        print(f"[Sound] Error during initialization: {e}")
-        if sound_sensor_device:
-            sound_sensor_device.close()
-        sound_sensor_device = None
-        raise
+        logger.error(f"[{DEVICE_NAME}] Error starting monitoring: {e}")
 
 
-def stop_sound_monitoring():
-    """Cleans up GPIO resources for the sound sensor."""
-    global sound_sensor_device
-    if sound_sensor_device:
-        print(
-            f"[Sound] Stopping monitoring and cleaning up {SOUND_DEVICE_NAME} GPIO resources..."
-        )
-
-        sound_sensor_device.close()
-        sound_sensor_device = None
-        print(f"[Sound] {SOUND_DEVICE_NAME} GPIO resources cleaned up.")
-    else:
-        print(
-            f"[Sound] {SOUND_DEVICE_NAME} monitoring was not active or already cleaned up."
-        )
+def stop_sound_monitoring() -> None:
+    global _is_monitoring, _monitoring_thread, _sound_sensor_device
+    logger.info(f"[{DEVICE_NAME}] Stopping monitoring...")
+    _is_monitoring.clear()
+    if _monitoring_thread and _monitoring_thread.is_alive():
+        _monitoring_thread.join(timeout=2.0)
+        if _monitoring_thread.is_alive():
+            logger.warning(f"[{DEVICE_NAME}] Monitoring thread did not finish in time.")
+    if _sound_sensor_device:
+        _sound_sensor_device.close()
+        _sound_sensor_device = None
+    logger.info(f"[{DEVICE_NAME}] Monitoring stopped.")
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ from src.utils.mqtt import (
     MQTT_PASSWORD,
     MQTT_USERNAME,
     get_mqtt_client,
-    publish_message,
+    publish_string,
     subscribe_to_topic,
 )
 
@@ -81,7 +81,7 @@ def test_mqtt_publish_subscribe(
     time.sleep(2)  # Wait longer for subscription to complete
 
     # Publish test message
-    publish_message(mqtt_client, TEST_TOPIC, TEST_PAYLOAD, qos=1)
+    publish_string(TEST_TOPIC, TEST_PAYLOAD, qos=1)
 
     # Wait for message
     message_received = message_received_event.wait(timeout=WAIT_TIMEOUT_SECONDS)
