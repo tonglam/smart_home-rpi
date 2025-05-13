@@ -1,0 +1,10 @@
+picamera2==0.3.16
+pillow==11.2.1
+paho-mqtt==2.1.0
+python-dotenv==1.1.0
+pytest==8.3.5
+pytest-mock==3.14.0
+boto3==1.38.14
+supabase==2.15.1
+gpiozero
+RPi.GPIO
