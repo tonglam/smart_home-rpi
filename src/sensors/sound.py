@@ -1,7 +1,5 @@
-import sys
 import threading
 import time
-from signal import pause
 from typing import Optional
 
 from gpiozero import InputDevice
@@ -105,24 +103,3 @@ def stop_sound_monitoring() -> None:
         _sound_sensor_device.close()
         _sound_sensor_device = None
     logger.info(f"[{DEVICE_NAME}] Monitoring stopped.")
-
-
-if __name__ == "__main__":
-    print("[Sound] Standalone Test Mode")
-
-    test_home_id = "00:1A:22:33:44:55"
-    test_user_id = "test_user"
-
-    try:
-        start_sound_monitoring(home_id=test_home_id, user_id=test_user_id)
-        print("[Sound Standalone] Monitoring active. Press Ctrl+C to stop.")
-        pause()
-    except KeyboardInterrupt:
-        print("\n[Sound Standalone] KeyboardInterrupt received.")
-    except Exception as e:
-        print(f"[Sound Standalone] An error occurred: {e}")
-    finally:
-        stop_sound_monitoring()
-        print("[Sound] Standalone script finished.")
-
-    sys.exit(0)

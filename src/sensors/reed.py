@@ -14,7 +14,7 @@ from src.utils.database import (
 from src.utils.logger import logger
 
 DEVICE_ID = "door_sensor_01"
-DEVICE_NAME = "Front Door Reed Switch"
+DEVICE_NAME = "Door Reed Switch"
 DEVICE_TYPE = "reed_switch"
 
 # GPIO pin configuration
