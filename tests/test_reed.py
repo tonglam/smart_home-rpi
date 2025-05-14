@@ -1,15 +1,13 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
-from src.sensors import reed
 from src.sensors.reed import (
     DEVICE_ID,
     DEVICE_NAME,
     DEVICE_TYPE,
     REED_PIN,
     start_reed_monitoring,
-    stop_reed_monitoring,
 )
 
 

@@ -3,15 +3,13 @@
 import json
 import os
 import sys
-import threading
 import time
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import numpy as np
 import paho.mqtt.client as mqtt
 import pytest
-from PIL import Image
 
 # Mock picamera2 module and its submodules before importing camera
 picamera2_mock = MagicMock()

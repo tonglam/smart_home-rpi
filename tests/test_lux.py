@@ -1,15 +1,5 @@
 import sys
-import threading
-
-# import time # Not strictly needed if all sleeps are mocked in tests
-# import unittest # Not needed for pytest style
-from unittest.mock import (  # Keep for general mocking utilities if used by pytest tests indirectly, though mocker is preferred
-    ANY,
-    MagicMock,
-    Mock,
-    call,
-    patch,
-)
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -25,13 +15,6 @@ if "PiicoDev_VEML6030" not in sys.modules:
     sys.modules["PiicoDev_VEML6030"] = mock_veml6030_module_global
 
 from src.sensors import lux
-from src.utils.database import (
-    get_device_by_id,
-    get_latest_device_state,
-    insert_device,
-    insert_event,
-    update_device_state,
-)
 
 DEVICE_ID = "lux_sensor_01"
 DEVICE_NAME = "Ambient Light Sensor"
