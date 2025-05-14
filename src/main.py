@@ -3,7 +3,7 @@ import sys
 
 from dotenv import load_dotenv
 
-from sensors import camera, reed, sound
+from sensors import camera, lux, motion, reed, sound
 from utils.database import get_user_id_for_home
 from utils.logger import logger
 from utils.mqtt import _mqtt_client_instance, get_mqtt_client
@@ -17,16 +17,14 @@ if __name__ == "__main__":
     app_user_id = None
 
     if not app_home_id:
-        logger.critical(
-            "Critical Error: HOME_ID not set in .env file. Application cannot start."
-        )
+        logger.error("Error: HOME_ID not set in .env file. Application cannot start.")
         sys.exit(1)
 
     logger.info(f"Application using HOME_ID: {app_home_id}")
     app_user_id = get_user_id_for_home(app_home_id)
     if not app_user_id:
-        logger.warning(
-            f"Warning: Could not fetch user_id for HOME_ID '{app_home_id}'. Alerts may lack user association."
+        logger.error(
+            f"Error: Could not fetch user_id for HOME_ID '{app_home_id}'. Alerts may lack user association."
         )
     else:
         logger.info(f"Application using USER_ID: {app_user_id}")
@@ -44,6 +42,12 @@ if __name__ == "__main__":
         logger.info("Initializing Camera Streaming...")
         camera.start_camera_streaming(home_id=app_home_id)
 
+        logger.info("Initializing Lux Sensor Monitoring...")
+        lux.start_lux_monitoring(home_id=app_home_id)
+
+        logger.info("Initializing Motion Sensor Monitoring...")
+        motion.start_motion_monitoring(home_id=app_home_id)
+
         logger.info(
             "Component initialization finished. GPIO event monitoring is active."
         )
@@ -59,6 +63,8 @@ if __name__ == "__main__":
         reed.stop_reed_monitoring()
         sound.stop_sound_monitoring()
         camera.stop_camera_streaming()
+        lux.stop_lux_monitoring()
+        motion.stop_motion_monitoring()
 
         if _mqtt_client_instance and _mqtt_client_instance.is_connected():
             logger.info("[Main] Disconnecting MQTT client...")
