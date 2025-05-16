@@ -7,6 +7,7 @@ from gpiozero import Button
 
 from src.utils.database import (
     get_device_by_id,
+    get_home_mode,
     insert_alert,
     insert_device,
     insert_event,
@@ -37,12 +38,18 @@ def _on_door_opened_callback(home_id: str, user_id: str):
         old_state="closed",
         new_state="open",
     )
-    insert_alert(
-        home_id=home_id,
-        user_id=user_id,
-        device_id=DEVICE_ID,
-        message="Door opened.",
-    )
+
+    # Only generate alert if home is in away mode
+    home_mode = get_home_mode(home_id)
+    if home_mode == "away":
+        alert_message = "Security Alert: Door opened while home is in away mode!"
+        logger.warning(f"[{DEVICE_NAME}] {alert_message}")
+        insert_alert(
+            home_id=home_id,
+            user_id=user_id,
+            device_id=DEVICE_ID,
+            message=alert_message,
+        )
 
 
 def _on_door_closed_callback(home_id: str, user_id: str):
@@ -55,12 +62,18 @@ def _on_door_closed_callback(home_id: str, user_id: str):
         old_state="open",
         new_state="closed",
     )
-    insert_alert(
-        home_id=home_id,
-        user_id=user_id,
-        device_id=DEVICE_ID,
-        message="Door closed.",
-    )
+
+    # Only generate alert if home is in away mode
+    home_mode = get_home_mode(home_id)
+    if home_mode == "away":
+        alert_message = "Door closed while home is in away mode."
+        logger.info(f"[{DEVICE_NAME}] {alert_message}")
+        insert_alert(
+            home_id=home_id,
+            user_id=user_id,
+            device_id=DEVICE_ID,
+            message=alert_message,
+        )
 
 
 def _reed_monitoring_loop():

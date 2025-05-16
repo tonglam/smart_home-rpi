@@ -11,7 +11,12 @@ from picamera2.encoders import MP4Encoder
 from PIL import Image
 
 from src.utils.cloudflare import upload_file_to_r2
-from src.utils.database import get_device_by_id, insert_device, insert_event
+from src.utils.database import (
+    get_device_by_id,
+    insert_device,
+    insert_event,
+    update_device_state,
+)
 from src.utils.logger import logger
 from src.utils.mqtt import get_mqtt_client, publish_json
 
@@ -28,7 +33,7 @@ RECORDING_DURATION_SECONDS = 300  # 5 minutes
 VIDEO_FILE_PATH = "recording.mp4"
 
 # MQTT topics
-MQTT_CAMERA_LIVE_TOPIC = "/live"
+MQTT_CAMERA_LIVE_TOPIC = "live"
 
 # Global state
 _picamera_object: Optional[Picamera2] = None
@@ -60,6 +65,7 @@ def _setup_camera() -> bool:
         logger.error(f"[{DEVICE_NAME}] Error setting up camera: {e}")
         if _picamera_object:
             _picamera_object.close()
+            _picamera_object = None
         return False
 
 
@@ -192,53 +198,90 @@ def start_camera_streaming(home_id: str) -> None:
         f"[{DEVICE_NAME}] Attempting to start streaming and recording for HOME_ID: {home_id}..."
     )
 
+    # First check if camera is already running
+    device = get_device_by_id(DEVICE_ID)
+    if device and device.get("currentState") == "online":
+        logger.warning(
+            f"[{DEVICE_NAME}] Camera is already marked as online in database. Will attempt to restart."
+        )
+        # Force cleanup of any existing resources
+        _cleanup_camera()
+
     if not _setup_camera():
+        logger.error(f"[{DEVICE_NAME}] Failed to setup camera hardware.")
+        _update_camera_state(home_id, "error", "Failed to initialize camera hardware")
         return
 
     if not _setup_mqtt():
+        logger.error(f"[{DEVICE_NAME}] Failed to setup MQTT.")
         _cleanup_camera()
+        _update_camera_state(home_id, "error", "Failed to initialize MQTT")
         return
 
-    # Get or register device
     try:
-        device = get_device_by_id(DEVICE_ID)
+        # Get or register device
         if not device:
             logger.info(
-                f"[{DEVICE_NAME}] Device ID {DEVICE_ID} not found in DB. Registering..."
+                f"[{DEVICE_NAME}] First time initialization. Registering device..."
             )
             device = insert_device(
                 device_id=DEVICE_ID,
                 home_id=home_id,
                 name=DEVICE_NAME,
                 type=DEVICE_TYPE,
-                current_state="online",
+                current_state="initializing",
             )
             if not device:
                 logger.error(f"[{DEVICE_NAME}] Failed to register device.")
                 _cleanup_camera()
                 return
 
-        # Log camera start event
-        event = insert_event(
-            home_id=home_id,
-            device_id=DEVICE_ID,
-            event_type="camera_started",
-            old_state="offline",
-            new_state="online",
-        )
-        if not event:
-            logger.error(f"[{DEVICE_NAME}] Failed to log camera start event.")
-            _cleanup_camera()
-            return
+        # Update state to online and log the event
+        _update_camera_state(home_id, "online", "Camera streaming started")
 
         # Start camera thread
         _is_running.set()
         _camera_thread = threading.Thread(target=_camera_loop, args=(home_id,))
+        _camera_thread.daemon = (
+            True  # Make thread daemon so it exits when main program exits
+        )
         _camera_thread.start()
 
     except Exception as e:
         logger.error(f"[{DEVICE_NAME}] Error starting camera: {e}")
         _cleanup_camera()
+        _update_camera_state(home_id, "error", f"Error starting camera: {str(e)}")
+
+
+def _update_camera_state(home_id: str, new_state: str, message: str) -> None:
+    """Update camera state in database and log the event.
+
+    Args:
+        home_id: The ID of the home this camera belongs to
+        new_state: New state of the camera ('online', 'offline', 'error', 'initializing')
+        message: Message describing the state change
+    """
+    try:
+        # Get current state for event logging
+        device = get_device_by_id(DEVICE_ID)
+        old_state = device.get("currentState") if device else None
+
+        # Update device state
+        update_device_state(DEVICE_ID, new_state)
+
+        # Log the event
+        insert_event(
+            home_id=home_id,
+            device_id=DEVICE_ID,
+            event_type="camera_state_changed",
+            old_state=old_state,
+            new_state=new_state,
+            event_data={"message": message},
+        )
+
+        logger.info(f"[{DEVICE_NAME}] State updated to {new_state}: {message}")
+    except Exception as e:
+        logger.error(f"[{DEVICE_NAME}] Error updating camera state: {e}")
 
 
 def stop_camera_streaming(home_id: str) -> None:
@@ -271,19 +314,12 @@ def stop_camera_streaming(home_id: str) -> None:
             _picamera_object = None
             logger.info(f"[{DEVICE_NAME}] Camera stopped and closed.")
 
-            # Log camera stop event
-            event = insert_event(
-                home_id=home_id,
-                device_id=DEVICE_ID,
-                event_type="camera_stopped",
-                old_state="online",
-                new_state="offline",
-            )
-            if not event:
-                logger.error(f"[{DEVICE_NAME}] Failed to log camera stop event.")
+            # Update state to offline
+            _update_camera_state(home_id, "offline", "Camera streaming stopped")
 
         except Exception as e:
             logger.error(f"[{DEVICE_NAME}] Error stopping camera: {e}")
+            _update_camera_state(home_id, "error", f"Error stopping camera: {str(e)}")
 
     logger.info(
         f"[{DEVICE_NAME}] Streaming and recording stopped, resources cleaned up."

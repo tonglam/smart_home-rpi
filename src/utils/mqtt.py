@@ -39,19 +39,124 @@ def on_connect(
 
 
 def _handle_light_control_message(payload: dict) -> None:
-    """Placeholder for handling light control messages."""
-    logger.info(
-        f"[_handle_light_control_message] Received light control payload: {payload}"
-    )
-    # TODO: Implement actual light control logic
+    """Handle light control messages from MQTT.
+
+    Expected payload formats:
+    1. On/Off control:
+    {
+        "homeId": "00:1A:22:33:44:55",
+        "type": "light",
+        "deviceId": "light_e5f6g7h8",
+        "state": "on"|"off",
+        "createdAt": "2025-05-16T18:34:28.140Z"
+    }
+
+    2. Brightness control:
+    {
+        "homeId": "00:1A:22:33:44:55",
+        "type": "light",
+        "deviceId": "light_e5f6g7h8",
+        "state": "on",
+        "brightness": 0|25|50|100,
+        "createdAt": "2025-05-16T18:35:17.251Z"
+    }
+    """
+    from src.sensors.light import set_light_intensity, turn_light_off, turn_light_on
+
+    try:
+        logger.info(f"[MQTT] Received light control payload: {payload}")
+
+        # Validate required fields
+        required_fields = ["homeId", "type", "deviceId", "state"]
+        if not all(field in payload for field in required_fields):
+            logger.error(
+                f"[MQTT] Missing required fields in light control payload: {payload}"
+            )
+            return
+
+        # Only process light type messages
+        if payload["type"] != "light":
+            logger.error(
+                f"[MQTT] Received non-light type in light control handler: {payload['type']}"
+            )
+            return
+
+        home_id = payload["homeId"]
+        state = payload["state"].lower()
+
+        # Handle brightness control
+        if "brightness" in payload:
+            brightness = int(payload["brightness"])
+            # Map brightness levels to intensity values
+            intensity_map = {
+                0: 0.0,  # Off
+                25: 0.3,  # Low
+                50: 0.5,  # Medium
+                100: 1.0,  # Full
+            }
+            if brightness in intensity_map:
+                logger.info(f"[MQTT] Setting light brightness to {brightness}%")
+                set_light_intensity(home_id, intensity_map[brightness])
+            else:
+                logger.error(
+                    f"[MQTT] Invalid brightness value: {brightness}. Must be one of: {list(intensity_map.keys())}"
+                )
+            return
+
+        # Handle on/off control
+        if state == "on":
+            logger.info("[MQTT] Turning light on")
+            turn_light_on(home_id)
+        elif state == "off":
+            logger.info("[MQTT] Turning light off")
+            turn_light_off(home_id)
+        else:
+            logger.error(f"[MQTT] Invalid light state: {state}. Must be 'on' or 'off'")
+
+    except Exception as e:
+        logger.error(f"[MQTT] Error handling light control message: {e}")
 
 
 def _handle_automation_control_message(payload: dict) -> None:
-    """Placeholder for handling automation control messages."""
-    logger.info(
-        f"[_handle_automation_control_message] Received automation control payload: {payload}"
-    )
-    # TODO: Implement actual automation control logic
+    """Handle automation control messages from MQTT.
+
+    Expected payload format:
+    {
+        "homeId": "00:1A:22:33:44:55",
+        "type": "automation",
+        "modeId": "movie",
+        "active": true|false,
+        "createdAt": "2025-05-16T18:39:59.196Z"
+    }
+    """
+    from src.sensors.light import turn_light_off
+
+    try:
+        # Validate required fields
+        required_fields = ["homeId", "type", "modeId", "active"]
+        for field in required_fields:
+            if field not in payload:
+                logger.error(
+                    f"[MQTT] Missing required field '{field}' in automation control payload"
+                )
+                return
+
+        home_id = payload["homeId"]
+        mode_id = payload["modeId"]
+        is_active = payload["active"]
+
+        # Only handle movie mode for now
+        if mode_id == "movie":
+            logger.info(
+                f"[MQTT] Movie mode {'activated' if is_active else 'deactivated'} for home {home_id}"
+            )
+            if is_active:
+                # When movie mode is activated, turn off the light
+                turn_light_off(home_id)
+                logger.info("[MQTT] Turned off lights for movie mode")
+
+    except Exception as e:
+        logger.error(f"[MQTT] Error handling automation control message: {e}")
 
 
 def on_message(client: mqtt.Client, userdata: any, msg: mqtt.MQTTMessage) -> None:

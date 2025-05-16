@@ -64,6 +64,7 @@ if __name__ == "__main__":
         camera.stop_camera_streaming(app_home_id)
         lux.stop_lux_monitoring()
         motion.stop_motion_monitoring()
+        light.cleanup_light()
 
         if _mqtt_client_instance and _mqtt_client_instance.is_connected():
             logger.info("[Main] Disconnecting MQTT client...")

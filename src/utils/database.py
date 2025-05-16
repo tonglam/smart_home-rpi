@@ -78,7 +78,7 @@ def get_user_id_for_home(home_id: str) -> str | None:
                 )
                 return None
         else:
-            logger.warning(
+            logger.error(
                 f"No user_id found for HOME_ID: {home_id} in user_homes table."
             )
             return None
@@ -162,7 +162,7 @@ def get_device_by_id(device_id: str) -> dict | None:
             logger.info(f"Device found with id '{device_id}': {response.data[0]}")
             return response.data[0]
         else:
-            logger.warning(f"No device found with id '{device_id}'.")
+            logger.error(f"No device found with id '{device_id}'.")
             return None
     except Exception as e:
         logger.error(
@@ -233,12 +233,70 @@ def update_device_state(device_id: str, new_state: str) -> dict | None:
                     f"Error updating device state: Device with id '{device_id}' not found."
                 )
             else:
-                logger.warning(
+                logger.error(
                     f"Device state update for {device_id} returned no data, but device exists. Response: {response}"
                 )
             return None
     except Exception as e:
         logger.error(
             f"DB update error (devices - update_device_state for {device_id}): {e}"
+        )
+        return None
+
+
+def get_home_mode(home_id: str) -> str | None:
+    """Get the current mode for a home from user_homes table.
+
+    Args:
+        home_id: The ID of the home to check
+
+    Returns:
+        The current mode (e.g., 'home', 'away') or None if not found
+    """
+    try:
+        response = (
+            get_supabase_client()
+            .table("user_homes")
+            .select("mode")
+            .eq("homeId", home_id)
+            .limit(1)
+            .execute()
+        )
+        if response.data:
+            return response.data[0].get("mode")
+        else:
+            logger.error(f"No mode found for home_id: {home_id}")
+            return None
+    except Exception as e:
+        logger.error(f"DB query error (user_homes - get_home_mode for {home_id}): {e}")
+        return None
+
+
+def get_device_state(device_id: str) -> str | None:
+    """Get the current state of a device.
+
+    Args:
+        device_id: The ID of the device to check
+
+    Returns:
+        The current state of the device or None if not found
+    """
+    try:
+        response = (
+            get_supabase_client()
+            .table("devices")
+            .select("currentState")
+            .eq("id", device_id)
+            .limit(1)
+            .execute()
+        )
+        if response.data:
+            return response.data[0].get("currentState")
+        else:
+            logger.error(f"No device found with id: {device_id}")
+            return None
+    except Exception as e:
+        logger.error(
+            f"DB query error (devices - get_device_state for {device_id}): {e}"
         )
         return None

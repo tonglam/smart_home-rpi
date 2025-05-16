@@ -6,6 +6,8 @@ from gpiozero import InputDevice
 
 from src.utils.database import (
     get_device_by_id,
+    get_device_state,
+    get_home_mode,
     insert_alert,
     insert_device,
     insert_event,
@@ -37,6 +39,24 @@ def _sound_monitoring_loop(home_id: str, user_id: str):
         while _is_monitoring.is_set():
             if _sound_sensor_device and _sound_sensor_device.is_active:
                 logger.info(f"[{DEVICE_NAME}] Sound event detected.")
+
+                # Check home mode
+                home_mode = get_home_mode(home_id)
+                if home_mode == "away":
+                    # Check motion sensor state
+                    motion_state = get_device_state("motion_01")
+                    if motion_state == "moving_presence":
+                        # Both sound and motion detected while in away mode - potential security issue
+                        alert_message = "Security Alert: Motion and sound detected while home is in away mode. There might be someone in your home."
+                        logger.warning(f"[{DEVICE_NAME}] {alert_message}")
+                        insert_alert(
+                            home_id=home_id,
+                            user_id=user_id,
+                            device_id=DEVICE_ID,
+                            message=alert_message,
+                        )
+
+                # Log the event regardless of mode
                 insert_event(
                     home_id=home_id,
                     device_id=DEVICE_ID,
@@ -44,12 +64,7 @@ def _sound_monitoring_loop(home_id: str, user_id: str):
                     old_state=None,
                     new_state="detected",
                 )
-                insert_alert(
-                    home_id=home_id,
-                    user_id=user_id,
-                    device_id=DEVICE_ID,
-                    message="Sound detected.",
-                )
+
                 # Debounce: wait until sound is gone, then a short cooldown
                 while _sound_sensor_device.is_active and _is_monitoring.is_set():
                     time.sleep(0.05)

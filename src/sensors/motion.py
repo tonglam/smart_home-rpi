@@ -8,7 +8,11 @@ import serial
 
 from src.utils.database import (
     get_device_by_id,
+    get_device_state,
+    get_home_mode,
     get_latest_device_state,
+    get_user_id_for_home,
+    insert_alert,
     insert_device,
     insert_event,
     update_device_state,
@@ -102,6 +106,25 @@ def _motion_monitoring_loop(home_id: str) -> None:
                 old_state_str = get_latest_device_state(
                     home_id=home_id, device_id=DEVICE_ID
                 )
+
+                # Check for motion presence and home mode
+                if current_status_enum == PresenceState.MOVING_PRESENCE:
+                    home_mode = get_home_mode(home_id)
+                    if home_mode == "away":
+                        # Check sound sensor state
+                        sound_state = get_device_state("sound_sensor_01")
+                        if sound_state == "detected":
+                            # Both motion and sound detected while in away mode
+                            user_id = get_user_id_for_home(home_id)
+                            if user_id:
+                                alert_message = "Security Alert: Motion and sound detected while home is in away mode. There might be someone in your home."
+                                logger.warning(f"{log_prefix} {alert_message}")
+                                insert_alert(
+                                    home_id=home_id,
+                                    user_id=user_id,
+                                    device_id=DEVICE_ID,
+                                    message=alert_message,
+                                )
 
                 if first_reading_after_start and old_state_str is None:
                     logger.info(
