@@ -22,11 +22,15 @@ GPIO_PIN_SOUND = 21
 _sound_sensor_device: Optional[InputDevice] = None
 _monitoring_thread: Optional[threading.Thread] = None
 _is_monitoring = threading.Event()
-_current_home_id: Optional[str] = None
-_current_user_id: Optional[str] = None
 
 
-def _sound_monitoring_loop():
+def _sound_monitoring_loop(home_id: str, user_id: str):
+    """Internal monitoring loop for sound sensor.
+
+    Args:
+        home_id: The ID of the home this sensor belongs to
+        user_id: The ID of the user to notify
+    """
     global _sound_sensor_device
     logger.info(f"[{DEVICE_NAME}] Sound sensor monitoring loop started.")
     try:
@@ -34,15 +38,15 @@ def _sound_monitoring_loop():
             if _sound_sensor_device and _sound_sensor_device.is_active:
                 logger.info(f"[{DEVICE_NAME}] Sound event detected.")
                 insert_event(
-                    home_id=_current_home_id,
+                    home_id=home_id,
                     device_id=DEVICE_ID,
                     event_type="sound_detected",
                     old_state=None,
                     new_state="detected",
                 )
                 insert_alert(
-                    home_id=_current_home_id,
-                    user_id=_current_user_id,
+                    home_id=home_id,
+                    user_id=user_id,
                     device_id=DEVICE_ID,
                     message="Sound detected.",
                 )
@@ -59,13 +63,17 @@ def _sound_monitoring_loop():
 
 
 def start_sound_monitoring(home_id: str, user_id: str) -> None:
-    global _monitoring_thread, _is_monitoring, _current_home_id, _current_user_id, _sound_sensor_device
+    """Start monitoring for sound events.
+
+    Args:
+        home_id: The ID of the home this sensor belongs to
+        user_id: The ID of the user to notify
+    """
+    global _monitoring_thread, _is_monitoring, _sound_sensor_device
 
     logger.info(
         f"[{DEVICE_NAME}] Starting monitoring for HOME_ID: {home_id}, USER_ID: {user_id}"
     )
-    _current_home_id = home_id
-    _current_user_id = user_id
 
     try:
         _sound_sensor_device = InputDevice(GPIO_PIN_SOUND, pull_up=False)
@@ -84,7 +92,10 @@ def start_sound_monitoring(home_id: str, user_id: str) -> None:
 
         # Start monitoring thread
         _is_monitoring.set()
-        _monitoring_thread = threading.Thread(target=_sound_monitoring_loop)
+        _monitoring_thread = threading.Thread(
+            target=_sound_monitoring_loop,
+            args=(home_id, user_id),
+        )
         _monitoring_thread.start()
         logger.info(f"[{DEVICE_NAME}] Monitoring started.")
     except Exception as e:

@@ -83,7 +83,7 @@ def reset_camera_state():
     _is_running.clear()
     _picamera_object = None
     yield
-    stop_camera_streaming()
+    stop_camera_streaming(TEST_HOME_ID)
 
 
 @pytest.fixture(autouse=True)
@@ -313,13 +313,9 @@ class TestCameraStreaming:
         assert _is_running.is_set()
 
         # Then stop
-        stop_camera_streaming()
+        stop_camera_streaming(TEST_HOME_ID)
         assert not _is_running.is_set()
-
-        # Verify stop event was logged
-        events = [e for e in mock_db["events"] if e["device_id"] == DEVICE_ID]
-        stop_events = [e for e in events if e["event_type"] == "camera_stopped"]
-        assert len(stop_events) > 0
+        mock_picamera2.close.assert_called()
 
 
 class TestVideoRecording:

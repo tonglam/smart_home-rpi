@@ -34,7 +34,6 @@ MQTT_CAMERA_LIVE_TOPIC = "/live"
 _picamera_object: Optional[Picamera2] = None
 _camera_thread: Optional[threading.Thread] = None
 _is_running = threading.Event()
-_current_home_id: Optional[str] = None
 
 
 def _setup_camera() -> bool:
@@ -187,13 +186,11 @@ def start_camera_streaming(home_id: str) -> None:
     Args:
         home_id: The ID of the home this camera belongs to
     """
-    global _picamera_object, _camera_thread, _current_home_id, _is_running
+    global _picamera_object, _camera_thread
 
     logger.info(
         f"[{DEVICE_NAME}] Attempting to start streaming and recording for HOME_ID: {home_id}..."
     )
-
-    _current_home_id = home_id
 
     if not _setup_camera():
         return
@@ -244,8 +241,12 @@ def start_camera_streaming(home_id: str) -> None:
         _cleanup_camera()
 
 
-def stop_camera_streaming() -> None:
-    """Stops the camera streaming and recording service."""
+def stop_camera_streaming(home_id: str) -> None:
+    """Stops the camera streaming and recording service.
+
+    Args:
+        home_id: The ID of the home this camera belongs to
+    """
     global _picamera_object, _camera_thread, _is_running
 
     logger.info(f"[{DEVICE_NAME}] Attempting to stop streaming and recording...")
@@ -271,16 +272,15 @@ def stop_camera_streaming() -> None:
             logger.info(f"[{DEVICE_NAME}] Camera stopped and closed.")
 
             # Log camera stop event
-            if _current_home_id:
-                event = insert_event(
-                    home_id=_current_home_id,
-                    device_id=DEVICE_ID,
-                    event_type="camera_stopped",
-                    old_state="online",
-                    new_state="offline",
-                )
-                if not event:
-                    logger.error(f"[{DEVICE_NAME}] Failed to log camera stop event.")
+            event = insert_event(
+                home_id=home_id,
+                device_id=DEVICE_ID,
+                event_type="camera_stopped",
+                old_state="online",
+                new_state="offline",
+            )
+            if not event:
+                logger.error(f"[{DEVICE_NAME}] Failed to log camera stop event.")
 
         except Exception as e:
             logger.error(f"[{DEVICE_NAME}] Error stopping camera: {e}")

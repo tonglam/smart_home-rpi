@@ -134,7 +134,9 @@ def test_sound_detection_callback(mock_input_device, mock_db_functions, mocker, 
     # Run the monitoring loop in a thread
     from src.sensors.sound import _is_monitoring, _sound_monitoring_loop
 
-    monitor_thread = threading.Thread(target=_sound_monitoring_loop)
+    monitor_thread = threading.Thread(
+        target=_sound_monitoring_loop, args=(home_id, user_id)
+    )
     _is_monitoring.set()
     monitor_thread.start()
 

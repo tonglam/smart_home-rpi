@@ -27,7 +27,6 @@ DEFAULT_BAUD_RATE = 115200
 _serial_connection: Optional[serial.Serial] = None
 _monitoring_thread: Optional[threading.Thread] = None
 _is_monitoring = threading.Event()
-_current_home_id: Optional[str] = None
 
 
 # --- Enum for Presence States ---

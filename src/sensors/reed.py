@@ -1,3 +1,4 @@
+import functools
 import threading
 import time
 from typing import Optional
@@ -24,41 +25,39 @@ REED_PIN = 17
 _reed_button: Optional[Button] = None
 _monitoring_thread: Optional[threading.Thread] = None
 _is_monitoring = threading.Event()
-_current_home_id: Optional[str] = None
-_current_user_id: Optional[str] = None
 
 
-def _on_door_opened_callback():
+def _on_door_opened_callback(home_id: str, user_id: str):
     logger.info(f"[{DEVICE_NAME}] Door opened detected.")
     update_device_state(DEVICE_ID, "open")
     insert_event(
-        home_id=_current_home_id,
+        home_id=home_id,
         device_id=DEVICE_ID,
         event_type="door_opened",
         old_state="closed",
         new_state="open",
     )
     insert_alert(
-        home_id=_current_home_id,
-        user_id=_current_user_id,
+        home_id=home_id,
+        user_id=user_id,
         device_id=DEVICE_ID,
         message="Door opened.",
     )
 
 
-def _on_door_closed_callback():
+def _on_door_closed_callback(home_id: str, user_id: str):
     logger.info(f"[{DEVICE_NAME}] Door closed detected.")
     update_device_state(DEVICE_ID, "closed")
     insert_event(
-        home_id=_current_home_id,
+        home_id=home_id,
         device_id=DEVICE_ID,
         event_type="door_closed",
         old_state="open",
         new_state="closed",
     )
     insert_alert(
-        home_id=_current_home_id,
-        user_id=_current_user_id,
+        home_id=home_id,
+        user_id=user_id,
         device_id=DEVICE_ID,
         message="Door closed.",
     )
@@ -76,18 +75,20 @@ def _reed_monitoring_loop():
 
 
 def start_reed_monitoring(home_id: str, user_id: str) -> None:
-    global _reed_button, _monitoring_thread, _is_monitoring, _current_home_id, _current_user_id
+    global _reed_button, _monitoring_thread, _is_monitoring
 
     logger.info(
         f"[{DEVICE_NAME}] Starting monitoring for HOME_ID: {home_id}, USER_ID: {user_id}"
     )
-    _current_home_id = home_id
-    _current_user_id = user_id
 
     try:
         _reed_button = Button(REED_PIN)
-        _reed_button.when_pressed = _on_door_closed_callback
-        _reed_button.when_released = _on_door_opened_callback
+        _reed_button.when_pressed = functools.partial(
+            _on_door_closed_callback, home_id, user_id
+        )
+        _reed_button.when_released = functools.partial(
+            _on_door_opened_callback, home_id, user_id
+        )
 
         # Register device if not present
         device = get_device_by_id(DEVICE_ID)

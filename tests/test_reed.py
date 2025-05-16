@@ -14,23 +14,24 @@ from src.sensors.reed import (
 @pytest.fixture
 def mock_button(mocker):
     """Mock gpiozero Button class."""
-    # Create a mock class
-    mock_class = MagicMock()
+    # Create a mock class for Button
+    mock_button_class = MagicMock()
 
     # Create a mock instance that will be returned when Button is instantiated
-    mock_instance = MagicMock()
-    mock_instance.when_pressed = None
-    mock_instance.when_released = None
-    mock_instance.close = MagicMock()
-    mock_instance.is_pressed = False
+    mock_button_instance = MagicMock()
+    mock_button_instance.when_pressed = None
+    mock_button_instance.when_released = None
+    mock_button_instance.close = MagicMock()
+    mock_button_instance.is_pressed = False  # Default state
 
-    # Configure the class mock to return our instance
-    mock_class.side_effect = lambda pin: mock_instance
+    # Configure the class mock to return our specific instance upon instantiation
+    mock_button_class.return_value = mock_button_instance
 
-    # Patch the Button class
-    mocker.patch("src.sensors.reed.Button", mock_class)
+    # Patch the Button class in the reed module
+    mocker.patch("src.sensors.reed.Button", mock_button_class)
 
-    return mock_class
+    # Return the mock CLASS and the INSTANCE it produces, for different assertion needs
+    return mock_button_class, mock_button_instance
 
 
 @pytest.fixture
@@ -52,6 +53,8 @@ def test_start_reed_monitoring_new_device(mock_button, mock_db_functions):
     home_id = "test_home_123"
     user_id = "test_user_123"
 
+    mock_button_class, _ = mock_button  # We need the class to assert it was called
+
     # Start monitoring
     start_reed_monitoring(home_id=home_id, user_id=user_id)
 
@@ -62,16 +65,16 @@ def test_start_reed_monitoring_new_device(mock_button, mock_db_functions):
         home_id=home_id,
         name=DEVICE_NAME,
         type=DEVICE_TYPE,
-        current_state="open",
+        current_state="open",  # Default based on mock_button_instance.is_pressed = False
     )
-    mock_button.assert_called_once()
-    assert mock_button.call_args[0][0] == REED_PIN
+    mock_button_class.assert_called_once_with(REED_PIN)
 
 
 def test_start_reed_monitoring_existing_device(mock_button, mock_db_functions):
     """Test starting reed monitoring for an existing device."""
     home_id = "test_home_123"
     user_id = "test_user_123"
+    mock_button_class, _ = mock_button
 
     # Mock existing device
     mock_db_functions["get_device_by_id"].return_value = {
@@ -87,8 +90,7 @@ def test_start_reed_monitoring_existing_device(mock_button, mock_db_functions):
     # Verify no device registration occurred
     mock_db_functions["get_device_by_id"].assert_called_once_with(DEVICE_ID)
     mock_db_functions["insert_device"].assert_not_called()
-    mock_button.assert_called_once()
-    assert mock_button.call_args[0][0] == REED_PIN
+    mock_button_class.assert_called_once_with(REED_PIN)
 
 
 def test_door_callbacks(mock_button, mock_db_functions):
@@ -96,18 +98,24 @@ def test_door_callbacks(mock_button, mock_db_functions):
     home_id = "test_home_123"
     user_id = "test_user_123"
 
-    # Start monitoring to set up callbacks
+    _, mock_button_instance = mock_button  # We need the instance to trigger callbacks
+
+    # Start monitoring to set up callbacks on mock_button_instance
     start_reed_monitoring(home_id=home_id, user_id=user_id)
 
-    # Get the mock instance that was created
-    mock_instance = mock_button.side_effect(REED_PIN)
-
-    # Reset mock call counts after initialization
+    # Reset mock call counts for DB functions after initialization effects
     mock_db_functions["insert_event"].reset_mock()
     mock_db_functions["insert_alert"].reset_mock()
+    # Also reset insert_device and get_device_by_id if they were called during init
+    # and we only want to test callback effects.
+    mock_db_functions["insert_device"].reset_mock()
+    mock_db_functions["get_device_by_id"].reset_mock()
 
-    # Test door opened callback
-    mock_instance.when_released()
+    # Test door opened callback (when_released)
+    # The when_released attribute on mock_button_instance now holds the functools.partial object
+    assert mock_button_instance.when_released is not None
+    mock_button_instance.when_released()  # Execute the callback
+
     mock_db_functions["insert_event"].assert_called_with(
         home_id=home_id,
         device_id=DEVICE_ID,
@@ -126,8 +134,10 @@ def test_door_callbacks(mock_button, mock_db_functions):
     mock_db_functions["insert_event"].reset_mock()
     mock_db_functions["insert_alert"].reset_mock()
 
-    # Test door closed callback
-    mock_instance.when_pressed()
+    # Test door closed callback (when_pressed)
+    assert mock_button_instance.when_pressed is not None
+    mock_button_instance.when_pressed()  # Execute the callback
+
     mock_db_functions["insert_event"].assert_called_with(
         home_id=home_id,
         device_id=DEVICE_ID,
@@ -145,15 +155,15 @@ def test_door_callbacks(mock_button, mock_db_functions):
 
 def test_stop_reed_monitoring(mocker):
     """Test stopping reed monitoring."""
-    # Create a single mock instance
-    mock_instance = MagicMock()
-    mock_instance.when_pressed = None
-    mock_instance.when_released = None
-    mock_instance.close = MagicMock()
-    mock_instance.is_pressed = False
+    # Create a single mock instance for Button
+    mock_button_instance = MagicMock()
+    mock_button_instance.when_pressed = None
+    mock_button_instance.when_released = None
+    mock_button_instance.close = MagicMock()
+    mock_button_instance.is_pressed = False
 
-    # Patch Button to always return this instance
-    mocker.patch("src.sensors.reed.Button", return_value=mock_instance)
+    # Patch Button class to always return this specific instance
+    mocker.patch("src.sensors.reed.Button", return_value=mock_button_instance)
 
     # Start monitoring first
     start_reed_monitoring(home_id="test_home_123", user_id="test_user_123")
@@ -163,14 +173,15 @@ def test_stop_reed_monitoring(mocker):
 
     local_stop()
 
-    # Verify cleanup (close should be called if the instance is not None)
-    mock_instance.close.assert_called()
+    # Verify cleanup (close should be called on the instance)
+    mock_button_instance.close.assert_called_once()
 
 
 def test_error_handling(mock_button, mock_db_functions, caplog):
     """Test error handling during initialization."""
+    mock_button_class, _ = mock_button
     # Configure mock to raise exception on instantiation
-    mock_button.side_effect = Exception("GPIO Error")
+    mock_button_class.side_effect = Exception("GPIO Error")
 
     # Should not raise, but should log an error
     start_reed_monitoring(home_id="test_home_123", user_id="test_user_123")
