@@ -118,6 +118,82 @@ def _process_and_publish_frame(frame: np.ndarray, home_id: str) -> None:
         logger.error(f"[{DEVICE_NAME}] Error processing/publishing frame: {e}")
 
 
+def _upload_recording_to_r2(home_id: str) -> bool:
+    """Upload the recorded video file to R2 storage.
+
+    Args:
+        home_id: The ID of the home this camera belongs to
+
+    Returns:
+        bool: True if upload was successful, False otherwise
+    """
+    if not os.path.exists(VIDEO_FILE_PATH):
+        logger.error(
+            f"[{DEVICE_NAME}] Video file not found for upload: {VIDEO_FILE_PATH}"
+        )
+        return False
+
+    try:
+        # Generate timestamped filename for R2 upload
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M")
+        r2_filename = f"recording-{timestamp}.mp4"
+        r2_path = f"{home_id}/{DEVICE_ID}/{r2_filename}"
+
+        if upload_file_to_r2(VIDEO_FILE_PATH, r2_path):
+            logger.info(f"[{DEVICE_NAME}] Video uploaded to R2: {r2_path}")
+            try:
+                os.remove(VIDEO_FILE_PATH)
+            except Exception as e:
+                logger.error(f"[{DEVICE_NAME}] Error removing local video file: {e}")
+            return True
+        else:
+            logger.error(f"[{DEVICE_NAME}] Failed to upload video to R2")
+            return False
+    except Exception as e:
+        logger.error(f"[{DEVICE_NAME}] Error during R2 upload process: {e}")
+        return False
+
+
+def _handle_recording(
+    home_id: str, current_time: float, recording_start_time: float, is_recording: bool
+) -> tuple[float, bool]:
+    """Handle video recording operations.
+
+    Args:
+        home_id: The ID of the home this camera belongs to
+        current_time: Current timestamp
+        recording_start_time: Start time of current recording
+        is_recording: Current recording state
+
+    Returns:
+        tuple[float, bool]: Updated recording_start_time and is_recording state
+    """
+    global _picamera_object
+
+    if not is_recording:
+        logger.info(f"[{DEVICE_NAME}] Starting new recording segment...")
+        _picamera_object.start_recording(MP4Encoder(), VIDEO_FILE_PATH)
+        return current_time, True
+
+    if current_time - recording_start_time >= RECORDING_DURATION_SECONDS:
+        logger.info(
+            f"[{DEVICE_NAME}] Segment duration reached. Stopping current recording..."
+        )
+        _picamera_object.stop_recording()
+        logger.info(f"[{DEVICE_NAME}] Current recording stopped.")
+
+        # Upload current recording to R2
+        _upload_recording_to_r2(home_id)
+
+        # Start new recording segment
+        logger.info(f"[{DEVICE_NAME}] Starting new recording segment...")
+        _picamera_object.start_recording(MP4Encoder(), VIDEO_FILE_PATH)
+        logger.info(f"[{DEVICE_NAME}] New recording segment started.")
+        return current_time, True
+
+    return recording_start_time, is_recording
+
+
 def _camera_loop(home_id: str) -> None:
     """Main camera loop for capturing and publishing frames.
 
@@ -140,38 +216,9 @@ def _camera_loop(home_id: str) -> None:
 
             # Handle video recording
             current_time = time.time()
-            if not is_recording:
-                logger.info(f"[{DEVICE_NAME}] Starting new recording segment...")
-                _picamera_object.start_recording(MP4Encoder(), VIDEO_FILE_PATH)
-                recording_start_time = current_time
-                is_recording = True
-            elif current_time - recording_start_time >= RECORDING_DURATION_SECONDS:
-                logger.info(
-                    f"[{DEVICE_NAME}] Segment duration reached. Stopping current recording..."
-                )
-                _picamera_object.stop_recording()
-                logger.info(f"[{DEVICE_NAME}] Current recording stopped.")
-
-                # Upload to R2 if file exists
-                if os.path.exists(VIDEO_FILE_PATH):
-                    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-                    r2_path = f"{home_id}/{DEVICE_ID}/{timestamp}.mp4"
-                    if upload_file_to_r2(VIDEO_FILE_PATH, r2_path):
-                        logger.info(f"[{DEVICE_NAME}] Video uploaded to R2: {r2_path}")
-                        try:
-                            os.remove(VIDEO_FILE_PATH)
-                        except Exception as e:
-                            logger.error(
-                                f"[{DEVICE_NAME}] Error removing local video file: {e}"
-                            )
-                    else:
-                        logger.error(f"[{DEVICE_NAME}] Failed to upload video to R2")
-
-                # Start new recording segment
-                logger.info(f"[{DEVICE_NAME}] Starting new recording segment...")
-                _picamera_object.start_recording(MP4Encoder(), VIDEO_FILE_PATH)
-                recording_start_time = current_time
-                logger.info(f"[{DEVICE_NAME}] New recording segment started.")
+            recording_start_time, is_recording = _handle_recording(
+                home_id, current_time, recording_start_time, is_recording
+            )
 
             time.sleep(1.0 / FRAME_RATE)
 
