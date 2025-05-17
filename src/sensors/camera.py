@@ -135,9 +135,7 @@ def _upload_recording_to_r2(home_id: str) -> bool:
 
     try:
         # Generate timestamped filename for R2 upload
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M")
-        r2_filename = f"recording-{timestamp}.mp4"
-        r2_path = f"{home_id}/{DEVICE_ID}/{r2_filename}"
+        r2_path = f"recording.mp4"
 
         if upload_file_to_r2(VIDEO_FILE_PATH, r2_path):
             logger.info(f"[{DEVICE_NAME}] Video uploaded to R2: {r2_path}")
