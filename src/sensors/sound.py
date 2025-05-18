@@ -18,7 +18,7 @@ DEVICE_ID = "sound_sensor_01"
 DEVICE_NAME = "Sound Sensor"
 DEVICE_TYPE = "sound_sensor"
 
-GPIO_PIN_SOUND = 21
+GPIO_PIN_SOUND = 20
 
 # Global state
 _sound_sensor_device: Optional[InputDevice] = None

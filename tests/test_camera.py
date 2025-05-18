@@ -415,3 +415,17 @@ class TestErrorHandling:
         time.sleep(
             0.1
         )  # Allow camera thread to process and attempt initial start recording
+
+    def test_update_camera_state(mock_db_functions_camera):
+        """Test updating camera state in database."""
+        # Arrange
+        now_iso = datetime.now(timezone.utc).isoformat()
+        mock_db_functions_camera["get_device_by_id"].return_value = {
+            "id": DEVICE_ID,
+            "home_id": HOME_ID_TEST,
+            "name": DEVICE_NAME,
+            "type": DEVICE_TYPE,
+            "current_state": "offline",
+            "created_at": now_iso,
+            "last_updated": now_iso,
+        }

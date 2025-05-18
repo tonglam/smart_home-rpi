@@ -218,7 +218,7 @@ def start_motion_monitoring(home_id: str) -> bool:
             )
             logger.info(f"{log_prefix} Device registered successfully.")
         else:
-            current_db_state = device.get("currentState", PresenceState.UNKNOWN.value)
+            current_db_state = device.get("current_state", PresenceState.UNKNOWN.value)
             try:
                 PresenceState(current_db_state)
             except ValueError:

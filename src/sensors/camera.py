@@ -245,7 +245,7 @@ def start_camera_streaming(home_id: str) -> None:
 
     # First check if camera is already running
     device = get_device_by_id(DEVICE_ID)
-    if device and device.get("currentState") == "online":
+    if device and device.get("current_state") == "online":
         logger.warning(
             f"[{DEVICE_NAME}] Camera is already marked as online in database. Will attempt to restart."
         )
@@ -309,7 +309,7 @@ def _update_camera_state(home_id: str, new_state: str, message: str) -> None:
     try:
         # Get current state for event logging
         device = get_device_by_id(DEVICE_ID)
-        old_state = device.get("currentState") if device else None
+        old_state = device.get("current_state") if device else None
 
         # Update device state
         update_device_state(DEVICE_ID, new_state)

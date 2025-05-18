@@ -63,18 +63,18 @@ def get_user_id_for_home(home_id: str) -> str | None:
         response = (
             get_supabase_client()
             .table("user_homes")
-            .select("userId")
-            .eq("homeId", home_id)
+            .select("user_id")
+            .eq("home_id", home_id)
             .execute()
         )
         if response.data:
-            user_id = response.data[0].get("userId")
+            user_id = response.data[0].get("user_id")
             if user_id:
-                logger.info(f"Found userId: {user_id} for HOME_ID: {home_id}")
+                logger.info(f"Found user_id: {user_id} for HOME_ID: {home_id}")
                 return user_id
             else:
                 logger.error(
-                    f"Error: 'userId' field not found in response for HOME_ID: {home_id}. Data: {response.data[0]}"
+                    f"Error: 'user_id' field not found in response for HOME_ID: {home_id}. Data: {response.data[0]}"
                 )
                 return None
         else:
@@ -186,15 +186,15 @@ def insert_device(
         now_iso = datetime.now(timezone.utc).isoformat()
         device_data = {
             "id": device_id,
-            "homeId": home_id,
+            "home_id": home_id,
             "name": name,
             "type": type,
             "location": location,
             "mode": mode,
-            "currentState": current_state,
+            "current_state": current_state,
             "brightness": brightness,
-            "createdAt": now_iso,
-            "lastUpdated": now_iso,
+            "created_at": now_iso,
+            "last_updated": now_iso,
         }
 
         response = get_supabase_client().table("devices").insert(device_data).execute()
@@ -205,17 +205,18 @@ def insert_device(
         return {"error": str(e)}
 
 
-def update_device_state(device_id: str, new_state: str) -> dict | None:
-    """Updates the currentState and lastUpdated of a device in the devices table."""
-    if not device_id:
-        logger.error("Error: device_id is required to update a device.")
-        return None
+def update_device_state(device_id: str, new_state: str | dict) -> None:
+    """Updates the current_state and last_updated of a device in the devices table."""
     try:
         now_iso = datetime.now(timezone.utc).isoformat()
-        update_data = {
-            "currentState": new_state,
-            "lastUpdated": now_iso,
-        }
+        if isinstance(new_state, str):
+            update_data = {
+                "current_state": new_state,
+                "last_updated": now_iso,
+            }
+        else:
+            update_data = {**new_state, "last_updated": now_iso}
+
         response = (
             get_supabase_client()
             .table("devices")
@@ -223,25 +224,9 @@ def update_device_state(device_id: str, new_state: str) -> dict | None:
             .eq("id", device_id)
             .execute()
         )
-        if response.data:
-            logger.info(f"Device state updated for {device_id}: {response.data[0]}")
-            return response.data[0]
-        else:
-            device = get_device_by_id(device_id)
-            if not device:
-                logger.error(
-                    f"Error updating device state: Device with id '{device_id}' not found."
-                )
-            else:
-                logger.error(
-                    f"Device state update for {device_id} returned no data, but device exists. Response: {response}"
-                )
-            return None
+        logger.info(f"Device state updated: {response.data}")
     except Exception as e:
-        logger.error(
-            f"DB update error (devices - update_device_state for {device_id}): {e}"
-        )
-        return None
+        logger.error(f"DB update error (devices): {e}")
 
 
 def get_home_mode(home_id: str) -> str | None:
@@ -258,7 +243,7 @@ def get_home_mode(home_id: str) -> str | None:
             get_supabase_client()
             .table("user_homes")
             .select("mode")
-            .eq("homeId", home_id)
+            .eq("home_id", home_id)
             .limit(1)
             .execute()
         )
@@ -273,30 +258,21 @@ def get_home_mode(home_id: str) -> str | None:
 
 
 def get_device_state(device_id: str) -> str | None:
-    """Get the current state of a device.
-
-    Args:
-        device_id: The ID of the device to check
-
-    Returns:
-        The current state of the device or None if not found
-    """
+    """Get the current state of a device from the devices table."""
     try:
         response = (
             get_supabase_client()
             .table("devices")
-            .select("currentState")
+            .select("current_state")
             .eq("id", device_id)
             .limit(1)
             .execute()
         )
         if response.data:
-            return response.data[0].get("currentState")
+            return response.data[0].get("current_state")
         else:
-            logger.error(f"No device found with id: {device_id}")
+            logger.error(f"No state found for device_id: {device_id}")
             return None
     except Exception as e:
-        logger.error(
-            f"DB query error (devices - get_device_state for {device_id}): {e}"
-        )
+        logger.error(f"DB query error (devices - get_device_state): {e}")
         return None

@@ -232,7 +232,7 @@ def test_start_motion_monitoring_existing_device(
     mock_db_functions_fixture["get_device_by_id"].return_value = {
         "id": TEST_DEVICE_ID,
         "name": motion.DEVICE_NAME,
-        "currentState": existing_device_state,  # This is from the main DB representation
+        "current_state": existing_device_state,  # This is from the main DB representation
     }
     # Initial condition: set our mock DB store to reflect this existing state
     mock_db_functions_fixture["mock_device_db_store"][
@@ -431,7 +431,7 @@ def test_monitoring_loop_serial_exception_reconnect(
     mock_db_functions_fixture["get_device_by_id"].return_value = {
         "id": TEST_DEVICE_ID,
         "name": motion.DEVICE_NAME,
-        "currentState": initial_state_before_error,
+        "current_state": initial_state_before_error,
     }
 
     motion.start_motion_monitoring(home_id=TEST_HOME_ID)
@@ -518,3 +518,29 @@ def test_parse_mmwave_state(mock_time_sleep_fixture):
     assert motion.parse_mmwave_state(0x02) == PresenceState.STILL_PRESENCE
     assert motion.parse_mmwave_state(0x03) == PresenceState.UNKNOWN
     assert motion.parse_mmwave_state(0xFF) == PresenceState.UNKNOWN
+
+
+def test_motion_monitoring_existing_device(mock_serial, mock_db_functions_motion):
+    """Test motion monitoring with an existing device."""
+    # Arrange
+    existing_device_state = PresenceState.NO_PRESENCE.value
+    mock_db_functions_motion["get_device_by_id"].return_value = {
+        "id": TEST_DEVICE_ID,
+        "home_id": TEST_HOME_ID,
+        "name": motion.DEVICE_NAME,
+        "type": motion.DEVICE_TYPE,
+        "current_state": existing_device_state,  # This is from the main DB representation
+    }
+
+
+def test_motion_monitoring_error_handling(mock_serial, mock_db_functions_motion):
+    """Test motion monitoring error handling."""
+    # Arrange
+    initial_state_before_error = PresenceState.NO_PRESENCE.value
+    mock_db_functions_motion["get_device_by_id"].return_value = {
+        "id": TEST_DEVICE_ID,
+        "home_id": TEST_HOME_ID,
+        "name": motion.DEVICE_NAME,
+        "type": motion.DEVICE_TYPE,
+        "current_state": initial_state_before_error,
+    }

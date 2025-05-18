@@ -117,23 +117,64 @@ def _handle_light_control_message(payload: dict) -> None:
         logger.error(f"[MQTT] Error handling light control message: {e}")
 
 
+def _handle_device_control_message(payload: dict) -> None:
+    """Handle device control messages from MQTT.
+
+    Expected payload format:
+    {
+        "home_id": "00:1A:22:33:44:55",
+        "type": "device",
+        "device_id": "light_01",
+        "state": "on",
+        "brightness": 50,
+        "created_at": "2025-05-16T18:39:59.196Z"
+    }
+    """
+    from src.sensors.light import turn_light_off, turn_light_on
+
+    try:
+        # Validate required fields
+        required_fields = ["home_id", "type", "device_id", "state"]
+        for field in required_fields:
+            if field not in payload:
+                logger.error(
+                    f"[MQTT] Missing required field '{field}' in device control payload"
+                )
+                return
+
+        home_id = payload["home_id"]
+        device_id = payload["device_id"]
+        state = payload["state"]
+        brightness = payload.get("brightness")
+
+        # Only handle light device for now
+        if device_id == "light_01":
+            if state == "on":
+                turn_light_on(home_id, brightness)
+            elif state == "off":
+                turn_light_off(home_id)
+
+    except Exception as e:
+        logger.error(f"[MQTT] Error handling device control message: {e}")
+
+
 def _handle_automation_control_message(payload: dict) -> None:
     """Handle automation control messages from MQTT.
 
     Expected payload format:
     {
-        "homeId": "00:1A:22:33:44:55",
+        "home_id": "00:1A:22:33:44:55",
         "type": "automation",
-        "modeId": "movie",
+        "mode_id": "movie",
         "active": true|false,
-        "createdAt": "2025-05-16T18:39:59.196Z"
+        "created_at": "2025-05-16T18:39:59.196Z"
     }
     """
     from src.sensors.light import turn_light_off
 
     try:
         # Validate required fields
-        required_fields = ["homeId", "type", "modeId", "active"]
+        required_fields = ["home_id", "type", "mode_id", "active"]
         for field in required_fields:
             if field not in payload:
                 logger.error(
@@ -141,8 +182,8 @@ def _handle_automation_control_message(payload: dict) -> None:
                 )
                 return
 
-        home_id = payload["homeId"]
-        mode_id = payload["modeId"]
+        home_id = payload["home_id"]
+        mode_id = payload["mode_id"]
         is_active = payload["active"]
 
         # Only handle movie mode for now
@@ -177,6 +218,8 @@ def on_message(client: mqtt.Client, userdata: any, msg: mqtt.MQTTMessage) -> Non
 
             if message_type == "light":
                 _handle_light_control_message(parsed_payload)
+            elif message_type == "device":
+                _handle_device_control_message(parsed_payload)
             elif message_type == "automation":
                 _handle_automation_control_message(parsed_payload)
             else:

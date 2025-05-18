@@ -162,9 +162,19 @@ def test_start_monitoring_already_running_pytest(
     assert thread1 == thread2
 
 
-def test_monitoring_loop_initial_read_and_state_change_pytest(
+def test_lux_monitoring_loop_existing_device(
     mock_piico_dev, mock_db_lux_functions, mock_lux_time_sleep, mock_lux_logger
 ):
+    """Test the lux monitoring loop with an existing device."""
+    # Arrange
+    mock_db_lux_functions["get_device_by_id"].return_value = {
+        "id": DEVICE_ID,
+        "home_id": HOME_ID_TEST,
+        "name": DEVICE_NAME,
+        "type": DEVICE_TYPE,
+        "current_state": "Day",
+    }
+
     mock_piico_dev.read.side_effect = [
         25.0,
         350.0,
@@ -222,19 +232,25 @@ def test_monitoring_loop_initial_read_and_state_change_pytest(
     ), f"Expected sleep to be called 2 times from loop, got {sleep_call_count}"
 
 
-def test_monitoring_loop_no_state_change_pytest(
+def test_lux_monitoring_loop_night_to_day_transition(
     mock_piico_dev, mock_db_lux_functions, mock_lux_time_sleep, mock_lux_logger
 ):
+    """Test the lux monitoring loop with a night to day transition."""
+    # Arrange
     mock_db_lux_functions["get_device_by_id"].return_value = {
         "id": DEVICE_ID,
-        "currentState": "Night",
+        "home_id": HOME_ID_TEST,
+        "name": DEVICE_NAME,
+        "type": DEVICE_TYPE,
+        "current_state": "Night",
     }
-    mock_db_lux_functions["get_latest_device_state"].return_value = "Night"
+
     mock_piico_dev.read.side_effect = [
         25.0,
         25.0,
         Exception("Read called too many times"),
     ]
+    mock_db_lux_functions["get_latest_device_state"].return_value = "Night"
 
     sleep_call_count = 0
 
