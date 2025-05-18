@@ -3,13 +3,13 @@ from typing import Optional
 
 from gpiozero import PWMLED
 
-from src.utils.database import (
+from ..utils.database import (
     get_device_by_id,
     insert_device,
     insert_event,
     update_device_state,
 )
-from src.utils.logger import logger
+from ..utils.logger import logger
 
 DEVICE_ID = "light_01"
 DEVICE_NAME = "PWM LED Light"

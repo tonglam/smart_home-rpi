@@ -2,22 +2,22 @@ import threading
 import time
 from typing import Optional
 
-from PiicoDev_VEML6030 import PiicoDev_VEML6030
+from gpiozero import MCP3008
 
-from src.utils.database import (
+from ..utils.database import (
     get_device_by_id,
     get_latest_device_state,
     insert_device,
     insert_event,
     update_device_state,
 )
-from src.utils.logger import logger
+from ..utils.logger import logger
 
 DEVICE_ID = "lux_sensor_01"
 DEVICE_NAME = "Ambient Light Sensor"
 DEVICE_TYPE = "lux_sensor"
 
-_sensor_instance: Optional[PiicoDev_VEML6030] = None
+_sensor_instance: Optional[MCP3008] = None
 _monitoring_thread: Optional[threading.Thread] = None
 _is_monitoring = threading.Event()
 
@@ -46,7 +46,7 @@ def _lux_monitoring_loop(home_id: str) -> None:
                 f"{log_prefix} Sensor instance not available. Re-initializing..."
             )
             try:
-                _sensor_instance = PiicoDev_VEML6030()
+                _sensor_instance = MCP3008()
                 logger.info(f"{log_prefix} Successfully re-initialized sensor.")
             except Exception as e_init:
                 logger.error(
@@ -56,7 +56,7 @@ def _lux_monitoring_loop(home_id: str) -> None:
                 continue
 
         try:
-            lux = _sensor_instance.read()
+            lux = _sensor_instance.value * 1000  # Convert from 0-1 to milli-lux
             current_status_str = categorize_lux(lux)
 
             old_state_str = get_latest_device_state(
@@ -123,8 +123,8 @@ def start_lux_monitoring(home_id: str) -> bool:
     logger.info(f"{log_prefix} Attempting to start monitoring for HOME_ID: {home_id}")
 
     try:
-        _sensor_instance = PiicoDev_VEML6030()
-        logger.info(f"{log_prefix} PiicoDev VEML6030 sensor initialized.")
+        _sensor_instance = MCP3008()
+        logger.info(f"{log_prefix} MCP3008 sensor initialized.")
 
         device = get_device_by_id(DEVICE_ID)
         initial_state = "unknown"

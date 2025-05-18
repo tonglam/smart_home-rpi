@@ -1,12 +1,13 @@
 import os
 import threading
 import time
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import Optional
 
 import serial
 
-from src.utils.database import (
+from ..utils.database import (
     get_device_by_id,
     get_device_state,
     get_home_mode,
@@ -17,7 +18,7 @@ from src.utils.database import (
     insert_event,
     update_device_state,
 )
-from src.utils.logger import logger
+from ..utils.logger import logger
 
 DEVICE_ID = "motion_01"
 DEVICE_NAME = "Room Motion Sensor"

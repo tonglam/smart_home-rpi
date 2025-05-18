@@ -1,18 +1,20 @@
 import threading
 import time
+from enum import Enum
 from typing import Optional
 
 from gpiozero import InputDevice
 
-from src.utils.database import (
+from ..utils.database import (
     get_device_by_id,
     get_device_state,
     get_home_mode,
     insert_alert,
     insert_device,
     insert_event,
+    update_device_state,
 )
-from src.utils.logger import logger
+from ..utils.logger import logger
 
 DEVICE_ID = "sound_sensor_01"
 DEVICE_NAME = "Sound Sensor"

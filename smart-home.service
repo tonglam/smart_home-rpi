@@ -4,9 +4,9 @@ After=network.target
 Wants=network-online.target
 
 [Service]
-# Service will run as the specified user
-User=adamslin
-Group=adamslin
+# Service will run as root to access GPIO
+User=root
+Group=root
 
 # Application directory
 WorkingDirectory=/home/adamslin/smart-home
@@ -17,7 +17,7 @@ Environment="PYTHONUNBUFFERED=1"
 Environment="PYTHONPATH=/home/adamslin/smart-home"
 
 # Start the application using venv Python
-ExecStart=sudo /home/adamslin/smart_home_env/bin/python src/main.py
+ExecStart=/home/adamslin/smart_home_env/bin/python src/main.py
 
 # Restart configuration
 Restart=always
