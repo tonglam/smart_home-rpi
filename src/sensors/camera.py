@@ -31,7 +31,7 @@ FRAME_WIDTH = 640
 FRAME_HEIGHT = 480
 FRAME_RATE = 30
 RECORDING_DURATION_SECONDS = 300  # 5 minutes
-VIDEO_FILE_PATH = "recording.mp4"
+VIDEO_FILE_PATH = "recording.h264"
 
 # MQTT topics
 MQTT_CAMERA_LIVE_TOPIC = "live"
@@ -136,7 +136,7 @@ def _upload_recording_to_r2(home_id: str) -> bool:
 
     try:
         # Generate timestamped filename for R2 upload
-        r2_path = f"recording.mp4"
+        r2_path = f"recording.h264"
 
         if upload_file_to_r2(VIDEO_FILE_PATH, r2_path):
             logger.info(f"[{DEVICE_NAME}] Video uploaded to R2: {r2_path}")
@@ -171,7 +171,7 @@ def _handle_recording(
 
     if not is_recording:
         logger.info(f"[{DEVICE_NAME}] Starting new recording segment...")
-        _picamera_object.start_recording(MP4Encoder(), VIDEO_FILE_PATH)
+        _picamera_object.start_recording(H264Encoder(), VIDEO_FILE_PATH)
         return current_time, True
 
     if current_time - recording_start_time >= RECORDING_DURATION_SECONDS:
@@ -186,7 +186,7 @@ def _handle_recording(
 
         # Start new recording segment
         logger.info(f"[{DEVICE_NAME}] Starting new recording segment...")
-        _picamera_object.start_recording(MP4Encoder(), VIDEO_FILE_PATH)
+        _picamera_object.start_recording(H264Encoder(), VIDEO_FILE_PATH)
         logger.info(f"[{DEVICE_NAME}] New recording segment started.")
         return current_time, True
 

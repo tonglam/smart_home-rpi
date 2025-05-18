@@ -9,7 +9,7 @@ numpy==1.24.2
 # GPIO and Hardware
 gpiozero
 RPi.GPIO
-picamera2==0.3.16
+picamera2==0.3.27
 PiicoDev
 pyserial==3.5
 piicodev
