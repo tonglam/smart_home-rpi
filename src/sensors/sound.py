@@ -39,7 +39,7 @@ def _sound_monitoring_loop(home_id: str, user_id: str):
     logger.info(f"[{DEVICE_NAME}] Sound sensor monitoring loop started.")
 
     last_detection_time = 0
-    DETECTION_COOLDOWN = 0.1  # 100ms cooldown between detections
+    DETECTION_COOLDOWN = 10.0  # 10 second cooldown between detections
 
     try:
         while _is_monitoring.is_set():
