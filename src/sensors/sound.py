@@ -110,8 +110,8 @@ def start_sound_monitoring(home_id: str, user_id: str) -> None:
     )
 
     try:
-        # Initialize with pull_down=True to prevent floating input when no sensor connected
-        _sound_sensor_device = InputDevice(GPIO_PIN_SOUND, pull_down=True)
+        # Initialize with pull_up=None to use pull-down resistor
+        _sound_sensor_device = InputDevice(GPIO_PIN_SOUND, pull_up=None)
 
         # Test if sensor is responding
         initial_state = "active" if _sound_sensor_device.is_active else "inactive"
