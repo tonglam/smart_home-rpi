@@ -5,9 +5,6 @@ import boto3
 from src.utils.logger import logger
 
 CLOUDFLARE_ACCOUNT_ID = os.getenv("CLOUDFLARE_ACCOUNT_ID")
-R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
-R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
-
 
 R2_BUCKET_NAME = "smart-home"
 R2_ENDPOINT_URL = os.getenv(
@@ -18,18 +15,33 @@ R2_ENDPOINT_URL = os.getenv(
 
 def get_r2_client():
     """Get the Cloudflare R2 client."""
+    # Fetch keys here, after load_dotenv() from main.py has run
+    r2_access_key_id = os.getenv("R2_ACCESS_KEY_ID")
+    r2_secret_access_key = os.getenv("R2_SECRET_ACCESS_KEY")
+
     # Ensure required environment variables are present for client creation
-    if not R2_ENDPOINT_URL or not R2_ACCESS_KEY_ID or not R2_SECRET_ACCESS_KEY:
+    if not R2_ENDPOINT_URL or not r2_access_key_id or not r2_secret_access_key:
         logger.error(
             "[Cloudflare] R2 client environment variables (ENDPOINT, KEY_ID, ACCESS_KEY) not fully configured."
+        )
+        # Log which specific variables are missing for better debugging
+        missing_vars = []
+        if not R2_ENDPOINT_URL:
+            missing_vars.append("R2_ENDPOINT_URL")
+        if not r2_access_key_id:
+            missing_vars.append("R2_ACCESS_KEY_ID")
+        if not r2_secret_access_key:
+            missing_vars.append("R2_SECRET_ACCESS_KEY")
+        logger.error(
+            f"[Cloudflare] Missing environment variables: {', '.join(missing_vars)}"
         )
         return None
 
     return boto3.client(
         "s3",
         endpoint_url=R2_ENDPOINT_URL,
-        aws_access_key_id=R2_ACCESS_KEY_ID,
-        aws_secret_access_key=R2_SECRET_ACCESS_KEY,
+        aws_access_key_id=r2_access_key_id,
+        aws_secret_access_key=r2_secret_access_key,
     )
 
 
