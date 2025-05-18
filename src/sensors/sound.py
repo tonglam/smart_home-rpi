@@ -27,7 +27,27 @@ _sound_sensor: Optional[Button] = None
 _monitoring_thread: Optional[threading.Thread] = None
 _is_monitoring = threading.Event()
 _last_detection_time = 0
-DETECTION_COOLDOWN = 3.0  # Reduced from 10s to 3s for better responsiveness
+_last_health_check_time = 0
+DETECTION_COOLDOWN = 10.0  # 10 second cooldown between detections
+HEALTH_CHECK_INTERVAL = 5.0  # Check sensor health every 5 seconds
+
+
+def _handle_disconnection():
+    """Handle sensor disconnection by updating state and logging."""
+    logger.error(f"[{DEVICE_NAME}] Sensor appears to be disconnected")
+    update_device_state(DEVICE_ID, "disconnected")
+
+    # Log the disconnection event
+    device = get_device_by_id(DEVICE_ID)
+    if device:
+        old_state = device.get("current_state", "unknown")
+        insert_event(
+            home_id=device.get("home_id"),
+            device_id=DEVICE_ID,
+            event_type="sensor_disconnected",
+            old_state=old_state,
+            new_state="disconnected",
+        )
 
 
 def _on_sound_detected():
@@ -37,55 +57,105 @@ def _on_sound_detected():
 
     # Check cooldown
     if current_time - _last_detection_time < DETECTION_COOLDOWN:
-        logger.debug(f"[{DEVICE_NAME}] Skipping detection due to cooldown")
+        logger.debug(
+            f"[{DEVICE_NAME}] Skipping detection due to cooldown ({DETECTION_COOLDOWN}s)"
+        )
         return
 
     _last_detection_time = current_time
     logger.info(f"[{DEVICE_NAME}] Sound event detected (Pin {GPIO_PIN_SOUND} active).")
 
-    # Update device state
-    update_device_state(DEVICE_ID, "detected")
+    try:
+        # Verify sensor is still connected
+        if _sound_sensor and _sound_sensor.pin.state is not None:
+            logger.debug(
+                f"[{DEVICE_NAME}] Pin state during detection: {_sound_sensor.pin.state}"
+            )
 
-    # Get the current device to check previous state
-    device = get_device_by_id(DEVICE_ID)
-    if device:
-        old_state = device.get("current_state", "idle")
-        # Log the event
-        insert_event(
-            home_id=device.get("home_id"),
-            device_id=DEVICE_ID,
-            event_type="sound_detected",
-            old_state=old_state,
-            new_state="detected",
-        )
+            # Update device state
+            update_device_state(DEVICE_ID, "detected")
+
+            # Get the current device to check previous state
+            device = get_device_by_id(DEVICE_ID)
+            if device:
+                old_state = device.get("current_state", "idle")
+                # Log the event
+                insert_event(
+                    home_id=device.get("home_id"),
+                    device_id=DEVICE_ID,
+                    event_type="sound_detected",
+                    old_state=old_state,
+                    new_state="detected",
+                )
+        else:
+            _handle_disconnection()
+
+    except Exception as e:
+        logger.error(f"[{DEVICE_NAME}] Error during sound detection: {e}")
+        _handle_disconnection()
 
 
 def _on_sound_ended():
     """Callback function for when sound detection ends."""
-    logger.info(f"[{DEVICE_NAME}] Sound event ended (Pin {GPIO_PIN_SOUND} inactive).")
-    update_device_state(DEVICE_ID, "idle")
+    try:
+        if _sound_sensor and _sound_sensor.pin.state is not None:
+            logger.info(
+                f"[{DEVICE_NAME}] Sound event ended (Pin {GPIO_PIN_SOUND} inactive)."
+            )
+            logger.debug(
+                f"[{DEVICE_NAME}] Pin state after sound ended: {_sound_sensor.pin.state}"
+            )
+            update_device_state(DEVICE_ID, "idle")
+        else:
+            _handle_disconnection()
+
+    except Exception as e:
+        logger.error(f"[{DEVICE_NAME}] Error during sound end detection: {e}")
+        _handle_disconnection()
+
+
+def _check_sensor_health() -> bool:
+    """Check if the sensor is still connected and functioning.
+
+    Returns:
+        bool: True if sensor is healthy, False otherwise
+    """
+    try:
+        if not _sound_sensor:
+            return False
+
+        # Try to read pin state
+        pin_state = _sound_sensor.pin.state
+        if pin_state is None:
+            return False
+
+        return True
+
+    except Exception as e:
+        logger.error(f"[{DEVICE_NAME}] Error checking sensor health: {e}")
+        return False
 
 
 def _sound_monitoring_loop():
     """Internal monitoring loop for sound sensor."""
+    global _last_health_check_time
+
     logger.info(f"[{DEVICE_NAME}] Sound sensor monitoring loop started.")
 
     try:
         while _is_monitoring.is_set():
-            if not _sound_sensor:
-                logger.error(f"[{DEVICE_NAME}] Sound sensor not initialized!")
-                break
+            current_time = time.time()
 
-            # Check sensor health
-            try:
-                _sound_sensor.pin.state  # This will raise an exception if the pin is invalid
-            except Exception as e:
-                logger.error(f"[{DEVICE_NAME}] Error reading sensor state: {e}")
-                update_device_state(DEVICE_ID, "error")
-                time.sleep(1)  # Wait before retrying
-                continue
+            # Periodic health check
+            if current_time - _last_health_check_time >= HEALTH_CHECK_INTERVAL:
+                _last_health_check_time = current_time
 
-            time.sleep(0.1)  # Reduced sleep time for more responsive detection
+                if not _check_sensor_health():
+                    _handle_disconnection()
+                    time.sleep(1)  # Wait before retrying
+                    continue
+
+            time.sleep(0.1)  # Quick sleep for responsive monitoring
 
     except Exception as e:
         logger.error(f"[{DEVICE_NAME}] Error in monitoring loop: {e}")
@@ -100,18 +170,18 @@ def start_sound_monitoring(home_id: str, user_id: str) -> None:
         home_id: The ID of the home this sensor belongs to
         user_id: The ID of the user to notify
     """
-    global _monitoring_thread, _is_monitoring, _sound_sensor
+    global _monitoring_thread, _is_monitoring, _sound_sensor, _last_detection_time, _last_health_check_time
 
     logger.info(
         f"[{DEVICE_NAME}] Starting monitoring for HOME_ID: {home_id}, USER_ID: {user_id}"
     )
 
     try:
-        # Initialize with pull-up resistor and edge detection
+        # Initialize with pull-down resistor for active-high sensor
         _sound_sensor = Button(
             GPIO_PIN_SOUND,
-            pull_up=True,
-            bounce_time=0.1,  # Add debounce to prevent false triggers
+            pull_up=False,  # Using pull-down mode for active-high sensor
+            bounce_time=0.05,  # Quick debounce time
         )
 
         # Set up callbacks for edge detection
@@ -119,10 +189,15 @@ def start_sound_monitoring(home_id: str, user_id: str) -> None:
         _sound_sensor.when_released = _on_sound_ended
 
         # Test if sensor is responding
-        initial_state = "active" if _sound_sensor.is_pressed else "inactive"
-        logger.info(
-            f"[{DEVICE_NAME}] Initial sensor state on pin {GPIO_PIN_SOUND}: {initial_state}"
-        )
+        if _check_sensor_health():
+            initial_state = "active" if _sound_sensor.is_pressed else "inactive"
+            pin_state = _sound_sensor.pin.state
+            logger.info(
+                f"[{DEVICE_NAME}] Initial sensor state on pin {GPIO_PIN_SOUND}: {initial_state} (pin state: {pin_state})"
+            )
+        else:
+            logger.error(f"[{DEVICE_NAME}] Failed initial sensor health check")
+            raise RuntimeError("Sensor health check failed during initialization")
 
         # Register device if not present
         device = get_device_by_id(DEVICE_ID)
@@ -136,12 +211,14 @@ def start_sound_monitoring(home_id: str, user_id: str) -> None:
                 current_state="idle",
             )
 
+        # Reset timers
+        _last_detection_time = 0  # Allow immediate first detection
+        _last_health_check_time = time.time()
+
         # Start monitoring thread
         _is_monitoring.set()
         _monitoring_thread = threading.Thread(target=_sound_monitoring_loop)
-        _monitoring_thread.daemon = (
-            True  # Make thread daemon so it exits with main program
-        )
+        _monitoring_thread.daemon = True
         _monitoring_thread.start()
         logger.info(f"[{DEVICE_NAME}] Monitoring started successfully.")
 

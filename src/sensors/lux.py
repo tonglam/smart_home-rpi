@@ -57,6 +57,7 @@ def _lux_monitoring_loop(home_id: str) -> None:
 
         try:
             lux = _sensor_instance.value * 1000  # Convert from 0-1 to milli-lux
+            logger.info(f"{log_prefix} Lux value: {lux}")
             current_status_str = categorize_lux(lux)
 
             old_state_str = get_latest_device_state(
