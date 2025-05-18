@@ -87,17 +87,29 @@ def _setup_mqtt() -> bool:
             )
             return False
 
-        if not mqtt_client.is_connected():
+        # Wait a moment for the non-blocking connect to establish
+        # Paho's connect() is non-blocking when loop_start() is used.
+        # The on_connect callback will eventually confirm, but for an immediate check,
+        # a short delay can help see if the background thread connects.
+        # Check multiple times with a short delay.
+        for attempt in range(3):  # Try for a few seconds
+            if mqtt_client.is_connected():
+                print(
+                    f"PRINT_DEBUG: [{DEVICE_NAME}] MQTT client connected successfully in _setup_mqtt (attempt {attempt + 1})."
+                )
+                return True
             print(
-                f"PRINT_DEBUG: [{DEVICE_NAME}] _setup_mqtt: mqtt_client.is_connected() is False."
+                f"PRINT_DEBUG: [{DEVICE_NAME}] _setup_mqtt: mqtt_client.is_connected() is False (attempt {attempt + 1}). Waiting..."
             )
-            logger.error(f"[{DEVICE_NAME}] MQTT client is not connected.")
-            return False
+            time.sleep(1)  # Wait 1 second
 
+        # If still not connected after retries
         print(
-            f"PRINT_DEBUG: [{DEVICE_NAME}] MQTT client connected successfully in _setup_mqtt."
+            f"PRINT_DEBUG: [{DEVICE_NAME}] _setup_mqtt: mqtt_client.is_connected() is still False after retries."
         )
-        return True
+        logger.error(f"[{DEVICE_NAME}] MQTT client is not connected after retries.")
+        return False
+
     except Exception as e:
         logger.error(f"[{DEVICE_NAME}] Error setting up MQTT: {e}", exc_info=True)
         print(f"PRINT_DEBUG: [{DEVICE_NAME}] Exception in _setup_mqtt: {e}")
