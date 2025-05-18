@@ -91,6 +91,7 @@ def _lux_monitoring_loop(home_id: str) -> None:
         try:
             # Read current lux value
             lux = _read_lux_value()
+            logger.info(f"{log_prefix} Lux value: {lux:.1f}")
 
             # Only log if value has changed significantly (>5% change)
             if last_lux_value is None or abs(lux - last_lux_value) > (
