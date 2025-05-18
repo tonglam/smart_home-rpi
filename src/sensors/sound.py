@@ -40,55 +40,78 @@ def _sound_monitoring_loop(home_id: str, user_id: str):
 
     last_detection_time = 0
     DETECTION_COOLDOWN = 10.0  # 10 second cooldown between detections
+    last_state = "idle"
 
     try:
         while _is_monitoring.is_set():
             current_time = time.time()
 
-            if (
-                _sound_sensor_device
-                and _sound_sensor_device.is_active
-                and current_time - last_detection_time >= DETECTION_COOLDOWN
-            ):
+            if not _sound_sensor_device:
+                logger.error(f"[{DEVICE_NAME}] Sound sensor device not initialized!")
+                break
 
-                logger.info(
-                    f"[{DEVICE_NAME}] Sound event detected (Pin {GPIO_PIN_SOUND} active)."
-                )
-                last_detection_time = current_time
+            try:
+                # Test if sensor is still connected and responding
+                is_active = _sound_sensor_device.is_active
+                current_state = "detected" if is_active else "idle"
 
-                # Update device state
-                update_device_state(DEVICE_ID, "detected")
-
-                # Check home mode
-                home_mode = get_home_mode(home_id)
-                if home_mode == "away":
-                    # Check motion sensor state
-                    motion_state = get_device_state("motion_01")
-                    if motion_state == "moving_presence":
-                        # Both sound and motion detected while in away mode - potential security issue
-                        alert_message = "Security Alert: Motion and sound detected while home is in away mode. There might be someone in your home."
-                        logger.warning(f"[{DEVICE_NAME}] {alert_message}")
-                        insert_alert(
-                            home_id=home_id,
-                            user_id=user_id,
-                            device_id=DEVICE_ID,
-                            message=alert_message,
+                # Only process state changes and respect cooldown
+                if current_state != last_state and (
+                    current_state == "idle"  # Always process transition to idle
+                    or current_time - last_detection_time
+                    >= DETECTION_COOLDOWN  # Respect cooldown for detections
+                ):
+                    if current_state == "detected":
+                        logger.info(
+                            f"[{DEVICE_NAME}] Sound event detected (Pin {GPIO_PIN_SOUND} active)."
                         )
+                        last_detection_time = current_time
 
-                # Log the event regardless of mode
-                insert_event(
-                    home_id=home_id,
-                    device_id=DEVICE_ID,
-                    event_type="sound_detected",
-                    old_state="idle",
-                    new_state="detected",
-                )
+                        # Update device state
+                        update_device_state(DEVICE_ID, "detected")
 
-            elif _sound_sensor_device and not _sound_sensor_device.is_active:
-                # Update state to idle when no sound is detected
-                update_device_state(DEVICE_ID, "idle")
+                        # Check home mode
+                        home_mode = get_home_mode(home_id)
+                        if home_mode == "away":
+                            # Check motion sensor state
+                            motion_state = get_device_state("motion_01")
+                            if motion_state == "moving_presence":
+                                # Both sound and motion detected while in away mode - potential security issue
+                                alert_message = "Security Alert: Motion and sound detected while home is in away mode. There might be someone in your home."
+                                logger.warning(f"[{DEVICE_NAME}] {alert_message}")
+                                insert_alert(
+                                    home_id=home_id,
+                                    user_id=user_id,
+                                    device_id=DEVICE_ID,
+                                    message=alert_message,
+                                )
 
-            time.sleep(0.01)  # Small sleep to prevent CPU hogging
+                        # Log the event
+                        insert_event(
+                            home_id=home_id,
+                            device_id=DEVICE_ID,
+                            event_type="sound_detected",
+                            old_state=last_state,
+                            new_state=current_state,
+                        )
+                    else:  # current_state == "idle"
+                        logger.info(
+                            f"[{DEVICE_NAME}] Sound event ended (Pin {GPIO_PIN_SOUND} inactive)."
+                        )
+                        update_device_state(DEVICE_ID, "idle")
+
+                    last_state = current_state
+
+            except Exception as e:
+                logger.error(f"[{DEVICE_NAME}] Error reading sensor state: {e}")
+                # If we can't read the sensor, assume it's disconnected
+                if last_state != "error":
+                    update_device_state(DEVICE_ID, "error")
+                    last_state = "error"
+                time.sleep(1)  # Wait before retrying
+                continue
+
+            time.sleep(0.1)  # Reduced sleep time for more responsive detection
 
     except Exception as e:
         logger.error(f"[{DEVICE_NAME}] Error in monitoring loop: {e}")
