@@ -62,7 +62,7 @@ def _setup_camera() -> bool:
         logger.info(f"[{DEVICE_NAME}] Camera started successfully.")
         return True
     except Exception as e:
-        logger.error(f"[{DEVICE_NAME}] Error setting up camera: {e}")
+        logger.error(f"[{DEVICE_NAME}] Error setting up camera: {e}", exc_info=True)
         if _picamera_object:
             _picamera_object.close()
             _picamera_object = None
@@ -83,7 +83,7 @@ def _setup_mqtt() -> bool:
         logger.info(f"[{DEVICE_NAME}] MQTT client connected.")
         return True
     except Exception as e:
-        logger.error(f"[{DEVICE_NAME}] Error setting up MQTT: {e}")
+        logger.error(f"[{DEVICE_NAME}] Error setting up MQTT: {e}", exc_info=True)
         return False
 
 
@@ -115,7 +115,9 @@ def _process_and_publish_frame(frame: np.ndarray, home_id: str) -> None:
         publish_json(MQTT_CAMERA_LIVE_TOPIC, message)
 
     except Exception as e:
-        logger.error(f"[{DEVICE_NAME}] Error processing/publishing frame: {e}")
+        logger.error(
+            f"[{DEVICE_NAME}] Error processing/publishing frame: {e}", exc_info=True
+        )
 
 
 def _upload_recording_to_r2(home_id: str) -> bool:
@@ -142,13 +144,18 @@ def _upload_recording_to_r2(home_id: str) -> bool:
             try:
                 os.remove(VIDEO_FILE_PATH)
             except Exception as e:
-                logger.error(f"[{DEVICE_NAME}] Error removing local video file: {e}")
+                logger.error(
+                    f"[{DEVICE_NAME}] Error removing local video file: {e}",
+                    exc_info=True,
+                )
             return True
         else:
             logger.error(f"[{DEVICE_NAME}] Failed to upload video to R2")
             return False
     except Exception as e:
-        logger.error(f"[{DEVICE_NAME}] Error during R2 upload process: {e}")
+        logger.error(
+            f"[{DEVICE_NAME}] Error during R2 upload process: {e}", exc_info=True
+        )
         return False
 
 
@@ -167,6 +174,12 @@ def _handle_recording(
         tuple[float, bool]: Updated recording_start_time and is_recording state
     """
     global _picamera_object
+
+    if not _picamera_object:
+        logger.error(
+            f"[{DEVICE_NAME}] _picamera_object is None in _handle_recording. Cannot control recording."
+        )
+        return recording_start_time, is_recording
 
     if not is_recording:
         logger.info(f"[{DEVICE_NAME}] Starting new recording segment...")
@@ -313,54 +326,88 @@ def start_camera_streaming(home_id: str) -> None:
     Args:
         home_id: The ID of the home this camera belongs to
     """
+    logger.info(
+        f"[{DEVICE_NAME}] FUNC_DEBUG: start_camera_streaming entered for HOME_ID: {home_id}"
+    )
     global _picamera_object, _camera_thread
 
     logger.info(
         f"[{DEVICE_NAME}] Attempting to start streaming and recording for HOME_ID: {home_id}..."
     )
 
+    logger.info(f"[{DEVICE_NAME}] FUNC_DEBUG: Checking existing device state...")
     # First check if camera is already running
-    device = get_device_by_id(DEVICE_ID)
+    device = get_device_by_id(DEVICE_ID)  # Initial fetch of device state
     if device and device.get("current_state") == "online":
         logger.warning(
-            f"[{DEVICE_NAME}] Camera is already marked as online in database. Will attempt to restart."
+            f"[{DEVICE_NAME}] Camera is already marked as online in database. Will attempt to restart by cleaning up."
         )
         # Force cleanup of any existing resources
         _cleanup_camera()
+        logger.info(f"[{DEVICE_NAME}] FUNC_DEBUG: _cleanup_camera called.")
+        device = None  # Reset device variable so it's re-evaluated later if needed
 
+    logger.info(f"[{DEVICE_NAME}] FUNC_DEBUG: Attempting _setup_camera()...")
     if not _setup_camera():
         logger.error(f"[{DEVICE_NAME}] Failed to setup camera hardware.")
         _update_camera_state(home_id, "error", "Failed to initialize camera hardware")
+        logger.info(
+            f"[{DEVICE_NAME}] FUNC_DEBUG: Exiting start_camera_streaming due to _setup_camera() failure."
+        )
         return
+    logger.info(f"[{DEVICE_NAME}] FUNC_DEBUG: _setup_camera() successful.")
 
+    logger.info(f"[{DEVICE_NAME}] FUNC_DEBUG: Attempting _setup_mqtt()...")
     if not _setup_mqtt():
         logger.error(f"[{DEVICE_NAME}] Failed to setup MQTT.")
         _cleanup_camera()
         _update_camera_state(home_id, "error", "Failed to initialize MQTT")
+        logger.info(
+            f"[{DEVICE_NAME}] FUNC_DEBUG: Exiting start_camera_streaming due to _setup_mqtt() failure."
+        )
         return
+    logger.info(f"[{DEVICE_NAME}] FUNC_DEBUG: _setup_mqtt() successful.")
 
+    logger.info(
+        f"[{DEVICE_NAME}] FUNC_DEBUG: Entering main try block for device registration and thread start..."
+    )
     try:
-        # Get or register device
-        if not device:
-            logger.info(
-                f"[{DEVICE_NAME}] First time initialization. Registering device..."
-            )
-            device = insert_device(
+        # Get or register device. Re-fetch device status here to be certain after potential cleanup.
+        current_device_in_db = get_device_by_id(DEVICE_ID)
+        logger.info(
+            f"[{DEVICE_NAME}] FUNC_DEBUG: Fetched current_device_in_db: {current_device_in_db is not None}"
+        )
+
+        if not current_device_in_db:
+            logger.info(f"[{DEVICE_NAME}] Device not in DB. Registering device...")
+            inserted_device = insert_device(
                 device_id=DEVICE_ID,
                 home_id=home_id,
                 name=DEVICE_NAME,
                 type=DEVICE_TYPE,
-                current_state="initializing",
+                current_state="initializing",  # Set to initializing, will be updated by _update_camera_state
             )
-            if not device:
-                logger.error(f"[{DEVICE_NAME}] Failed to register device.")
+            if not inserted_device:
+                logger.error(
+                    f"[{DEVICE_NAME}] Failed to register/insert device into DB."
+                )
                 _cleanup_camera()
+                logger.info(
+                    f"[{DEVICE_NAME}] FUNC_DEBUG: Exiting start_camera_streaming due to DB insert failure."
+                )
                 return
+            logger.info(f"[{DEVICE_NAME}] FUNC_DEBUG: Device inserted successfully.")
+        else:
+            logger.info(f"[{DEVICE_NAME}] FUNC_DEBUG: Device already exists in DB.")
 
         # Update state to online and log the event
+        logger.info(
+            f"[{DEVICE_NAME}] FUNC_DEBUG: Calling _update_camera_state to set 'online'..."
+        )
         _update_camera_state(home_id, "online", "Camera streaming started")
 
         # Start camera thread
+        logger.info(f"[{DEVICE_NAME}] FUNC_DEBUG: Setting _is_running event.")
         _is_running.set()
         _camera_thread = threading.Thread(target=_camera_loop, args=(home_id,))
         _camera_thread.daemon = (
@@ -379,11 +426,13 @@ def start_camera_streaming(home_id: str) -> None:
             logger.error(
                 f"[{DEVICE_NAME}] THREAD_DEBUG: _camera_thread.start() was called BUT THREAD IS NOT ALIVE."
             )
+        logger.info(f"[{DEVICE_NAME}] FUNC_DEBUG: Main try block completed.")
 
     except Exception as e:
-        logger.error(f"[{DEVICE_NAME}] Error starting camera: {e}")
+        logger.error(f"[{DEVICE_NAME}] Error starting camera: {e}", exc_info=True)
         _cleanup_camera()
         _update_camera_state(home_id, "error", f"Error starting camera: {str(e)}")
+    logger.info(f"[{DEVICE_NAME}] FUNC_DEBUG: Exiting start_camera_streaming function.")
 
 
 def _update_camera_state(home_id: str, new_state: str, message: str) -> None:
@@ -414,7 +463,7 @@ def _update_camera_state(home_id: str, new_state: str, message: str) -> None:
 
         logger.info(f"[{DEVICE_NAME}] State updated to {new_state}: {message}")
     except Exception as e:
-        logger.error(f"[{DEVICE_NAME}] Error updating camera state: {e}")
+        logger.error(f"[{DEVICE_NAME}] Error updating camera state: {e}", exc_info=True)
 
 
 def stop_camera_streaming(home_id: str) -> None:
@@ -451,7 +500,7 @@ def stop_camera_streaming(home_id: str) -> None:
             _update_camera_state(home_id, "offline", "Camera streaming stopped")
 
         except Exception as e:
-            logger.error(f"[{DEVICE_NAME}] Error stopping camera: {e}")
+            logger.error(f"[{DEVICE_NAME}] Error stopping camera: {e}", exc_info=True)
             _update_camera_state(home_id, "error", f"Error stopping camera: {str(e)}")
 
     logger.info(
@@ -477,4 +526,6 @@ def _cleanup_camera() -> None:
             _picamera_object = None
             logger.info(f"[{DEVICE_NAME}] Camera stopped and closed.")
         except Exception as e:
-            logger.error(f"[{DEVICE_NAME}] Error cleaning up camera: {e}")
+            logger.error(
+                f"[{DEVICE_NAME}] Error cleaning up camera: {e}", exc_info=True
+            )
