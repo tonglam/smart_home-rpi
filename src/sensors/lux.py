@@ -24,10 +24,16 @@ _is_monitoring = threading.Event()
 
 
 def categorize_lux(lux_value: float) -> str:
-    """Categorize lux value into time of day."""
-    if lux_value < 50:
+    """Categorize lux value into time of day.
+
+    Thresholds:
+    - Night: < 20 lux (very dark to dim light)
+    - Light Open: 20-500 lux (indoor lighting)
+    - Day: > 500 lux (bright daylight)
+    """
+    if lux_value < 20:  # Darker threshold for night
         return "Night"
-    elif lux_value < 300:
+    elif lux_value < 500:  # Wider range for normal indoor lighting
         return "Light Open"
     else:
         return "Day"
