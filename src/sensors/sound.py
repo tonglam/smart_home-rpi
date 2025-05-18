@@ -110,8 +110,8 @@ def start_sound_monitoring(home_id: str, user_id: str) -> None:
     )
 
     try:
-        # Initialize with active_state=True to detect HIGH as active
-        _sound_sensor_device = InputDevice(GPIO_PIN_SOUND, active_state=True)
+        # Initialize with pull-up resistor - sound detection will pull the pin LOW
+        _sound_sensor_device = InputDevice(GPIO_PIN_SOUND, pull_up=True)
 
         # Test if sensor is responding
         initial_state = "active" if _sound_sensor_device.is_active else "inactive"
