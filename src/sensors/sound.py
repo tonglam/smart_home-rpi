@@ -1,15 +1,11 @@
 import threading
 import time
-from enum import Enum
 from typing import Optional
 
 from gpiozero import Button  # Changed from InputDevice to Button for edge detection
 
 from src.utils.database import (
     get_device_by_id,
-    get_device_state,
-    get_home_mode,
-    insert_alert,
     insert_device,
     insert_event,
     update_device_state,

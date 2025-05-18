@@ -3,7 +3,7 @@ import sys
 
 from dotenv import load_dotenv
 
-from sensors import lux, sound
+from src.sensors import lux, reed, sound
 from utils.database import get_user_id_for_home
 from utils.logger import logger
 from utils.mqtt import _mqtt_client_instance, get_mqtt_client
@@ -29,8 +29,8 @@ if __name__ == "__main__":
         logger.info("Initializing MQTT Client...")
         get_mqtt_client()
 
-        # logger.info("Initializing Reed Switch Monitoring...")
-        # reed.start_reed_monitoring(home_id=app_home_id, user_id=app_user_id)
+        logger.info("Initializing Reed Switch Monitoring...")
+        reed.start_reed_monitoring(home_id=app_home_id, user_id=app_user_id)
 
         logger.info("Initializing Sound Sensor Monitoring...")
         sound.start_sound_monitoring(home_id=app_home_id, user_id=app_user_id)
@@ -59,7 +59,7 @@ if __name__ == "__main__":
         logger.error(f"[Main] An unexpected error occurred: {e}")
     finally:
         logger.info("[Main] Cleaning up resources...")
-        # reed.stop_reed_monitoring()
+        reed.stop_reed_monitoring()
         sound.stop_sound_monitoring()
         # camera.stop_camera_streaming(app_home_id)
         lux.stop_lux_monitoring()

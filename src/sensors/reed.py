@@ -20,7 +20,7 @@ DEVICE_NAME = "Door Reed Switch"
 DEVICE_TYPE = "reed_switch"
 
 # GPIO pin configuration
-REED_PIN = 17
+REED_PIN = 21
 
 # Global state
 _reed_button: Optional[Button] = None
