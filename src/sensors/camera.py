@@ -200,35 +200,100 @@ def _camera_loop(home_id: str) -> None:
     """
     global _picamera_object
 
-    logger.info(f"[{DEVICE_NAME}] Camera loop started for HOME_ID: {home_id}.")
+    logger.info(f"[{DEVICE_NAME}] Camera loop thread started for HOME_ID: {home_id}.")
 
     recording_start_time = time.time()
     is_recording = False
+    loop_iteration = 0
 
     try:
+        if not _is_running.is_set():
+            logger.warning(
+                f"[{DEVICE_NAME}] _is_running is not set at the start of _camera_loop. Exiting loop."
+            )
+            return
+
         while _is_running.is_set():
+            loop_iteration += 1
+            logger.debug(f"[{DEVICE_NAME}] Camera loop iteration: {loop_iteration}")
+
             # Capture and process frame
             if _picamera_object:
-                frame = _picamera_object.capture_array()
-                _process_and_publish_frame(frame, home_id)
+                logger.debug(f"[{DEVICE_NAME}] Attempting to capture frame...")
+                try:
+                    frame = _picamera_object.capture_array()
+                    logger.debug(
+                        f"[{DEVICE_NAME}] Frame captured successfully. Shape: {frame.shape if frame is not None else 'None'}"
+                    )
+
+                    logger.debug(
+                        f"[{DEVICE_NAME}] Attempting to process and publish frame..."
+                    )
+                    _process_and_publish_frame(frame, home_id)
+                    logger.debug(
+                        f"[{DEVICE_NAME}] Frame processing and publishing step completed."
+                    )
+
+                except Exception as e_capture_publish:
+                    logger.error(
+                        f"[{DEVICE_NAME}] Error during frame capture or publish: {e_capture_publish}",
+                        exc_info=True,
+                    )
+                    # Optional: short sleep to prevent rapid error logging if in a tight loop of failures
+                    time.sleep(1)
+                    continue  # Continue to next iteration or exit if _is_running is cleared
+
+            else:
+                logger.warning(
+                    f"[{DEVICE_NAME}] _picamera_object is None in loop iteration {loop_iteration}. Skipping capture."
+                )
+                time.sleep(1)  # Wait a bit if camera object is missing
 
             # Handle video recording
+            logger.debug(f"[{DEVICE_NAME}] Handling recording...")
             current_time = time.time()
-            recording_start_time, is_recording = _handle_recording(
-                home_id, current_time, recording_start_time, is_recording
-            )
+            try:
+                recording_start_time, is_recording = _handle_recording(
+                    home_id, current_time, recording_start_time, is_recording
+                )
+                logger.debug(
+                    f"[{DEVICE_NAME}] Recording handled. Is recording: {is_recording}"
+                )
+            except Exception as e_recording:
+                logger.error(
+                    f"[{DEVICE_NAME}] Error during _handle_recording: {e_recording}",
+                    exc_info=True,
+                )
+                # Optional: short sleep
+                time.sleep(1)
+                # Decide if to continue or break, for now, it continues
 
+            logger.debug(
+                f"[{DEVICE_NAME}] Sleeping for {1.0 / FRAME_RATE:.3f} seconds..."
+            )
             time.sleep(1.0 / FRAME_RATE)
 
     except Exception as e:
-        logger.error(f"[{DEVICE_NAME}] Error in camera loop: {e}")
+        logger.error(
+            f"[{DEVICE_NAME}] Unhandled error in camera_loop: {e}", exc_info=True
+        )
 
     finally:
         if is_recording and _picamera_object:
-            logger.info(f"[{DEVICE_NAME}] Stopping final recording...")
-            _picamera_object.stop_recording()
-            logger.info(f"[{DEVICE_NAME}] Final recording stopped.")
-        logger.info(f"[{DEVICE_NAME}] Camera loop ended.")
+            logger.info(
+                f"[{DEVICE_NAME}] Stopping final recording (from camera_loop finally block)..."
+            )
+            try:
+                _picamera_object.stop_recording()
+                logger.info(
+                    f"[{DEVICE_NAME}] Final recording stopped (from camera_loop finally block)."
+                )
+            except Exception as e_stop_final:
+                logger.error(
+                    f"[{DEVICE_NAME}] Error stopping final recording in finally block: {e_stop_final}",
+                    exc_info=True,
+                )
+        logger.info(f"[{DEVICE_NAME}] Camera loop ended (iteration {loop_iteration}).")
 
 
 def start_camera_streaming(home_id: str) -> None:
