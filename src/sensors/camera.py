@@ -326,6 +326,14 @@ def start_camera_streaming(home_id: str) -> None:
     Args:
         home_id: The ID of the home this camera belongs to
     """
+    # Failsafe print to check if the function is entered AT ALL
+    try:
+        print(
+            f"PRINT_DEBUG: [{DEVICE_NAME}] Entered start_camera_streaming for HOME_ID: {home_id}"
+        )
+    except Exception as e_print:
+        print(f"PRINT_DEBUG: [{DEVICE_NAME}] Exception in initial print: {e_print}")
+
     logger.info(
         f"[{DEVICE_NAME}] FUNC_DEBUG: start_camera_streaming entered for HOME_ID: {home_id}"
     )
