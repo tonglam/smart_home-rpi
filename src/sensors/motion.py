@@ -234,9 +234,6 @@ def _motion_monitoring_loop(home_id: str) -> None:
             logger.error(
                 f"{log_prefix} An unexpected error occurred in the monitoring loop: {e_loop_other}"
             )
-            print(
-                f"DEBUG: Unexpected error in loop: {type(e_loop_other).__name__}, {e_loop_other}"
-            )  # DEBUG PRINT
             time.sleep(5)
 
         time.sleep(1)
