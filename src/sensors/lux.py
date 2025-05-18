@@ -105,7 +105,6 @@ def _lux_monitoring_loop(home_id: str) -> None:
                     event_type="lux_level",
                     old_state=None,
                     new_state=current_status_str,
-                    event_data={"lux": lux},
                 )
                 first_reading_after_start = False
             elif old_state_str != current_status_str:
@@ -124,7 +123,6 @@ def _lux_monitoring_loop(home_id: str) -> None:
                     event_type="lux_level",
                     old_state=old_state_str,
                     new_state=current_status_str,
-                    event_data={"lux": lux},
                 )
             else:
                 if first_reading_after_start:
