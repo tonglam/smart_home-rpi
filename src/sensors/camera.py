@@ -7,8 +7,7 @@ from typing import Optional
 
 import numpy as np
 from picamera2 import Picamera2
-from picamera2.encoders import H264Encoder, MP4Encoder, Quality
-from picamera2.outputs import CircularOutput, FileOutput
+from picamera2.encoders import H264Encoder
 from PIL import Image
 
 from src.utils.cloudflare import upload_file_to_r2
