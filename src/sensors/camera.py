@@ -75,15 +75,32 @@ def _setup_mqtt() -> bool:
     Returns:
         bool: True if setup successful, False otherwise
     """
+    print(f"PRINT_DEBUG: [{DEVICE_NAME}] Attempting _setup_mqtt...")
     try:
         mqtt_client = get_mqtt_client()
-        if not mqtt_client or not mqtt_client.is_connected():
-            logger.error(f"[{DEVICE_NAME}] MQTT client not available or not connected.")
+        if not mqtt_client:
+            print(
+                f"PRINT_DEBUG: [{DEVICE_NAME}] _setup_mqtt: get_mqtt_client() returned None or False-equivalent."
+            )
+            logger.error(
+                f"[{DEVICE_NAME}] MQTT client not available (get_mqtt_client failed)."
+            )
             return False
-        logger.info(f"[{DEVICE_NAME}] MQTT client connected.")
+
+        if not mqtt_client.is_connected():
+            print(
+                f"PRINT_DEBUG: [{DEVICE_NAME}] _setup_mqtt: mqtt_client.is_connected() is False."
+            )
+            logger.error(f"[{DEVICE_NAME}] MQTT client is not connected.")
+            return False
+
+        print(
+            f"PRINT_DEBUG: [{DEVICE_NAME}] MQTT client connected successfully in _setup_mqtt."
+        )
         return True
     except Exception as e:
         logger.error(f"[{DEVICE_NAME}] Error setting up MQTT: {e}", exc_info=True)
+        print(f"PRINT_DEBUG: [{DEVICE_NAME}] Exception in _setup_mqtt: {e}")
         return False
 
 
