@@ -51,7 +51,9 @@ def _sound_monitoring_loop(home_id: str, user_id: str):
                 and current_time - last_detection_time >= DETECTION_COOLDOWN
             ):
 
-                logger.info(f"[{DEVICE_NAME}] Sound event detected.")
+                logger.info(
+                    f"[{DEVICE_NAME}] Sound event detected (Pin {GPIO_PIN_SOUND} active)."
+                )
                 last_detection_time = current_time
 
                 # Update device state
@@ -108,7 +110,14 @@ def start_sound_monitoring(home_id: str, user_id: str) -> None:
     )
 
     try:
-        _sound_sensor_device = InputDevice(GPIO_PIN_SOUND, pull_up=False)
+        # Initialize with pull_down=True to prevent floating input when no sensor connected
+        _sound_sensor_device = InputDevice(GPIO_PIN_SOUND, pull_down=True)
+
+        # Test if sensor is responding
+        initial_state = "active" if _sound_sensor_device.is_active else "inactive"
+        logger.info(
+            f"[{DEVICE_NAME}] Initial sensor state on pin {GPIO_PIN_SOUND}: {initial_state}"
+        )
 
         # Register device if not present
         device = get_device_by_id(DEVICE_ID)
