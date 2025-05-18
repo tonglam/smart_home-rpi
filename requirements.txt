@@ -13,8 +13,3 @@ picamera2==0.3.16
 PiicoDev
 PiicoDev-VEML6030
 pyserial==3.5
-
-# Testing
-pytest==8.3.5
-pytest-mock==3.14.0
-pytest-cov
