@@ -5,7 +5,7 @@ from typing import Optional
 
 from gpiozero import InputDevice
 
-from ..utils.database import (
+from src.utils.database import (
     get_device_by_id,
     get_device_state,
     get_home_mode,
@@ -14,7 +14,7 @@ from ..utils.database import (
     insert_event,
     update_device_state,
 )
-from ..utils.logger import logger
+from src.utils.logger import logger
 
 DEVICE_ID = "sound_sensor_01"
 DEVICE_NAME = "Sound Sensor"

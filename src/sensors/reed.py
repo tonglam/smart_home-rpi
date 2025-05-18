@@ -5,7 +5,7 @@ from typing import Optional
 
 from gpiozero import Button
 
-from ..utils.database import (
+from src.utils.database import (
     get_device_by_id,
     get_home_mode,
     insert_alert,
@@ -13,7 +13,7 @@ from ..utils.database import (
     insert_event,
     update_device_state,
 )
-from ..utils.logger import logger
+from src.utils.logger import logger
 
 DEVICE_ID = "door_sensor_01"
 DEVICE_NAME = "Door Reed Switch"

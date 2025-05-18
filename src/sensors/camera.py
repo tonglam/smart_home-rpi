@@ -11,15 +11,15 @@ from picamera2.encoders import H264Encoder, MP4Encoder, Quality
 from picamera2.outputs import CircularOutput, FileOutput
 from PIL import Image
 
-from ..utils.cloudflare import upload_file_to_r2
-from ..utils.database import (
+from src.utils.cloudflare import upload_file_to_r2
+from src.utils.database import (
     get_device_by_id,
     insert_device,
     insert_event,
     update_device_state,
 )
-from ..utils.logger import logger
-from ..utils.mqtt import get_mqtt_client, publish_json
+from src.utils.logger import logger
+from src.utils.mqtt import get_mqtt_client, publish_json
 
 # Device configuration
 DEVICE_ID = "camera_01"

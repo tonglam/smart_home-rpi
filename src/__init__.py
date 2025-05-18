@@ -1,0 +1,3 @@
+"""
+Smart Home RPi Application
+"""

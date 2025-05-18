@@ -4,14 +4,14 @@ from typing import Optional
 
 from gpiozero import MCP3008
 
-from ..utils.database import (
+from src.utils.database import (
     get_device_by_id,
     get_latest_device_state,
     insert_device,
     insert_event,
     update_device_state,
 )
-from ..utils.logger import logger
+from src.utils.logger import logger
 
 DEVICE_ID = "lux_sensor_01"
 DEVICE_NAME = "Ambient Light Sensor"
