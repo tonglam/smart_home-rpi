@@ -37,10 +37,25 @@ def _sound_monitoring_loop(home_id: str, user_id: str):
     """
     global _sound_sensor_device
     logger.info(f"[{DEVICE_NAME}] Sound sensor monitoring loop started.")
+
+    last_detection_time = 0
+    DETECTION_COOLDOWN = 0.1  # 100ms cooldown between detections
+
     try:
         while _is_monitoring.is_set():
-            if _sound_sensor_device and _sound_sensor_device.is_active:
+            current_time = time.time()
+
+            if (
+                _sound_sensor_device
+                and _sound_sensor_device.is_active
+                and current_time - last_detection_time >= DETECTION_COOLDOWN
+            ):
+
                 logger.info(f"[{DEVICE_NAME}] Sound event detected.")
+                last_detection_time = current_time
+
+                # Update device state
+                update_device_state(DEVICE_ID, "detected")
 
                 # Check home mode
                 home_mode = get_home_mode(home_id)
@@ -63,16 +78,16 @@ def _sound_monitoring_loop(home_id: str, user_id: str):
                     home_id=home_id,
                     device_id=DEVICE_ID,
                     event_type="sound_detected",
-                    old_state=None,
+                    old_state="idle",
                     new_state="detected",
                 )
 
-                # Debounce: wait until sound is gone, then a short cooldown
-                while _sound_sensor_device.is_active and _is_monitoring.is_set():
-                    time.sleep(0.05)
-                time.sleep(0.5)
-            else:
-                time.sleep(0.05)
+            elif _sound_sensor_device and not _sound_sensor_device.is_active:
+                # Update state to idle when no sound is detected
+                update_device_state(DEVICE_ID, "idle")
+
+            time.sleep(0.01)  # Small sleep to prevent CPU hogging
+
     except Exception as e:
         logger.error(f"[{DEVICE_NAME}] Error in monitoring loop: {e}")
     finally:
