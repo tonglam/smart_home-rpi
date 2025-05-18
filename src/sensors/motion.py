@@ -1,5 +1,4 @@
 import os
-import platform
 import threading
 import time
 from enum import Enum
@@ -25,14 +24,7 @@ DEVICE_NAME = "Room Motion Sensor"
 DEVICE_TYPE = "motion_sensor"
 
 # --- Default serial port configuration ---
-# Use different serial ports based on OS
-if platform.system() == "Darwin":  # macOS
-    DEFAULT_SERIAL_PORT = "/dev/tty.usbserial-0001"  # Common macOS USB-Serial adapter
-elif platform.system() == "Linux":  # Raspberry Pi/Linux
-    DEFAULT_SERIAL_PORT = "/dev/ttyS0"
-else:
-    DEFAULT_SERIAL_PORT = "COM1"  # Windows default
-
+DEFAULT_SERIAL_PORT = "/dev/ttyS0"  # Raspberry Pi hardware serial port
 DEFAULT_BAUD_RATE = 115200
 
 # --- Global state for the sensor module ---
@@ -68,36 +60,6 @@ def _motion_monitoring_loop(home_id: str) -> None:
     """Internal loop that reads sensor data, processes, and logs it."""
     global _serial_connection
     log_prefix = f"[{DEVICE_ID} ({DEVICE_NAME})]"
-
-    # For development on non-Linux systems, simulate the sensor
-    if platform.system() != "Linux":
-        logger.warning(
-            f"{log_prefix} Running in simulation mode (non-Linux system detected)"
-        )
-        while _is_monitoring.is_set():
-            # Simulate sensor readings
-            current_status_enum = PresenceState.NO_PRESENCE
-            current_status_str = current_status_enum.value
-
-            old_state_str = get_latest_device_state(
-                home_id=home_id, device_id=DEVICE_ID
-            )
-
-            if old_state_str != current_status_str:
-                logger.info(
-                    f"{log_prefix} Simulated state change to: {current_status_str}"
-                )
-                update_device_state(device_id=DEVICE_ID, new_state=current_status_str)
-                insert_event(
-                    home_id=home_id,
-                    device_id=DEVICE_ID,
-                    event_type="presence",
-                    old_state=old_state_str,
-                    new_state=current_status_str,
-                )
-
-            time.sleep(5)  # Simulate reading interval
-        return
 
     logger.info(
         f"{log_prefix} Monitoring loop started for HOME_ID: {home_id} on port {DEFAULT_SERIAL_PORT}."
