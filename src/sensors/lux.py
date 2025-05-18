@@ -2,7 +2,8 @@ import threading
 import time
 from typing import Optional
 
-from gpiozero import MCP3008
+from smbus2 import SMBus  # For I2C communication
+from veml6030 import VEML6030  # Digital ambient light sensor
 
 from src.utils.database import (
     get_device_by_id,
@@ -17,13 +18,15 @@ DEVICE_ID = "lux_sensor_01"
 DEVICE_NAME = "Ambient Light Sensor"
 DEVICE_TYPE = "lux_sensor"
 
-# ADC Configuration
-ADC_CHANNEL = 0  # Channel 0 of MCP3008
-REFERENCE_VOLTAGE = 3.3  # Reference voltage of Raspberry Pi
-LUX_SCALE_FACTOR = 1000.0  # Scale factor for converting voltage to lux
+# VEML6030 Configuration
+I2C_BUS = 1  # Raspberry Pi I2C bus number
+I2C_ADDRESS = 0x48  # Default VEML6030 I2C address
+GAIN = 1 / 8  # Set gain for appropriate range (1/8 for bright light)
+INTEGRATION_TIME = 100  # Integration time in ms (100ms is default)
 
 # Global state
-_sensor_instance: Optional[MCP3008] = None
+_sensor_instance: Optional[VEML6030] = None
+_i2c_bus: Optional[SMBus] = None
 _monitoring_thread: Optional[threading.Thread] = None
 _is_monitoring = threading.Event()
 
@@ -39,7 +42,7 @@ def categorize_lux(lux_value: float) -> str:
 
 
 def _read_lux_value() -> float:
-    """Read the current lux value from the sensor.
+    """Read the current lux value from the VEML6030 sensor.
 
     Returns:
         float: The current lux value in lux units
@@ -47,23 +50,18 @@ def _read_lux_value() -> float:
     if not _sensor_instance:
         raise RuntimeError("Sensor not initialized")
 
-    # Read raw value (0-1)
-    raw_value = _sensor_instance.value
-
-    # Convert to voltage (0-3.3V)
-    voltage = raw_value * REFERENCE_VOLTAGE
-
-    # Convert voltage to lux using calibration factor
-    # The conversion depends on your specific light sensor
-    # Here we use a simple linear conversion
-    lux = voltage * LUX_SCALE_FACTOR
-
-    return lux
+    try:
+        # Read lux value directly from sensor
+        lux = _sensor_instance.read_lux()
+        return lux
+    except Exception as e:
+        logger.error(f"[{DEVICE_NAME}] Error reading lux value: {e}")
+        raise
 
 
 def _lux_monitoring_loop(home_id: str) -> None:
     """Internal loop that reads lux sensor data, processes, and logs it."""
-    global _sensor_instance
+    global _sensor_instance, _i2c_bus
     log_prefix = f"[{DEVICE_ID} ({DEVICE_NAME})]"
 
     logger.info(f"{log_prefix} Monitoring loop started for HOME_ID: {home_id}.")
@@ -72,26 +70,32 @@ def _lux_monitoring_loop(home_id: str) -> None:
     last_lux_value = None
 
     while _is_monitoring.is_set():
-        if _sensor_instance is None:
+        if _sensor_instance is None or _i2c_bus is None:
             logger.error(
                 f"{log_prefix} Sensor instance not available. Re-initializing..."
             )
             try:
-                _sensor_instance = MCP3008(channel=ADC_CHANNEL)
+                _i2c_bus = SMBus(I2C_BUS)
+                _sensor_instance = VEML6030(_i2c_bus)
+                _sensor_instance.set_gain(GAIN)
+                _sensor_instance.set_integration_time(INTEGRATION_TIME)
                 logger.info(
-                    f"{log_prefix} Successfully re-initialized sensor on channel {ADC_CHANNEL}."
+                    f"{log_prefix} Successfully re-initialized VEML6030 sensor on I2C address 0x{I2C_ADDRESS:02x}"
                 )
             except Exception as e_init:
                 logger.error(
                     f"{log_prefix} Failed to re-initialize sensor: {e_init}. Retrying in 10s."
                 )
+                if _i2c_bus:
+                    _i2c_bus.close()
+                    _i2c_bus = None
+                _sensor_instance = None
                 time.sleep(10)
                 continue
 
         try:
             # Read current lux value
             lux = _read_lux_value()
-            logger.info(f"{log_prefix} Lux value: {lux:.1f}")
 
             # Only log if value has changed significantly (>5% change)
             if last_lux_value is None or abs(lux - last_lux_value) > (
@@ -146,6 +150,14 @@ def _lux_monitoring_loop(home_id: str) -> None:
             logger.error(
                 f"{log_prefix} An unexpected error occurred in the monitoring loop: {e_loop}"
             )
+            # Close and cleanup I2C on error
+            if _i2c_bus:
+                try:
+                    _i2c_bus.close()
+                except Exception:
+                    pass
+                _i2c_bus = None
+            _sensor_instance = None
             time.sleep(10)
 
         time.sleep(5)
@@ -155,7 +167,7 @@ def _lux_monitoring_loop(home_id: str) -> None:
 
 def start_lux_monitoring(home_id: str) -> bool:
     """Initializes and starts the lux sensor monitoring."""
-    global _sensor_instance, _monitoring_thread, _is_monitoring
+    global _sensor_instance, _i2c_bus, _monitoring_thread, _is_monitoring
     log_prefix = f"[{DEVICE_ID} ({DEVICE_NAME})]"
 
     if _is_monitoring.is_set():
@@ -167,9 +179,16 @@ def start_lux_monitoring(home_id: str) -> bool:
     logger.info(f"{log_prefix} Attempting to start monitoring for HOME_ID: {home_id}")
 
     try:
-        _sensor_instance = MCP3008(channel=ADC_CHANNEL)
+        # Initialize I2C and sensor
+        _i2c_bus = SMBus(I2C_BUS)
+        _sensor_instance = VEML6030(_i2c_bus)
+
+        # Configure sensor
+        _sensor_instance.set_gain(GAIN)
+        _sensor_instance.set_integration_time(INTEGRATION_TIME)
+
         logger.info(
-            f"{log_prefix} MCP3008 sensor initialized on channel {ADC_CHANNEL}."
+            f"{log_prefix} VEML6030 sensor initialized on I2C address 0x{I2C_ADDRESS:02x}"
         )
 
         # Test initial reading
@@ -212,15 +231,20 @@ def start_lux_monitoring(home_id: str) -> bool:
 
     except Exception as e_start:
         logger.error(f"{log_prefix} Error starting lux monitoring: {e_start}")
-        if _sensor_instance:
-            _sensor_instance = None
+        if _i2c_bus:
+            try:
+                _i2c_bus.close()
+            except Exception:
+                pass
+            _i2c_bus = None
+        _sensor_instance = None
         _is_monitoring.clear()
         return False
 
 
 def stop_lux_monitoring() -> None:
     """Stops the lux sensor monitoring."""
-    global _monitoring_thread, _is_monitoring, _sensor_instance
+    global _monitoring_thread, _is_monitoring, _sensor_instance, _i2c_bus
     log_prefix = f"[{DEVICE_ID} ({DEVICE_NAME})]"
 
     logger.info(f"{log_prefix} Attempting to stop lux monitoring...")
@@ -232,5 +256,13 @@ def stop_lux_monitoring() -> None:
         if _monitoring_thread.is_alive():
             logger.error(f"{log_prefix} Monitoring thread did not join in time.")
 
+    # Cleanup I2C resources
+    if _i2c_bus:
+        try:
+            _i2c_bus.close()
+        except Exception as e:
+            logger.error(f"{log_prefix} Error closing I2C bus: {e}")
+        _i2c_bus = None
     _sensor_instance = None
-    logger.info(f"{log_prefix} Lux monitoring stopped and resources (if any) released.")
+
+    logger.info(f"{log_prefix} Lux monitoring stopped and resources released.")
