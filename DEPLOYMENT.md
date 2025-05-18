@@ -39,12 +39,6 @@ sudo apt-get install -y \
     libopenjp2-7-dev
 
 # Camera dependencies
-# First, remove any existing camera packages
-sudo apt-get remove -y \
-    python3-libcamera \
-    python3-picamera2 \
-    libcamera-tools \
-    libcamera-dev
 
 # Clean up
 sudo apt-get autoremove -y
@@ -111,11 +105,11 @@ After=network.target
 
 [Service]
 Type=simple
-User=$USER
-Group=$USER
-WorkingDirectory=/home/$USER/smart-home
-Environment=PATH=/home/$USER/smart_home_env/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-ExecStart=/home/$USER/smart_home_env/bin/python src/main.py
+User=csseiot
+Group=csseiot
+WorkingDirectory=/home/csseiot/smart-home
+Environment=PATH=/home/csseiot/smart_home_env/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/home/csseiot/smart_home_env/bin/python src/main.py
 Restart=always
 RestartSec=5
 

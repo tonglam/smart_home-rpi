@@ -1,10 +1,13 @@
 import os
+import platform
+import sys
 import threading
 import time
 from enum import Enum
 from typing import Optional
 
 import serial
+from serial.tools import list_ports
 
 from src.utils.database import (
     get_device_by_id,
@@ -23,8 +26,40 @@ DEVICE_ID = "motion_01"
 DEVICE_NAME = "Room Motion Sensor"
 DEVICE_TYPE = "motion_sensor"
 
-# --- Default serial port configuration ---
-DEFAULT_SERIAL_PORT = "/dev/ttyS0"  # Raspberry Pi hardware serial port
+
+# --- Serial port configuration based on platform ---
+def get_default_serial_port() -> str:
+    """Returns the default serial port based on the operating system."""
+    system = platform.system().lower()
+
+    if system == "linux":
+        # Raspberry Pi hardware serial port
+        if os.path.exists("/dev/ttyS0"):
+            return "/dev/ttyS0"
+        # USB-to-Serial adapters usually appear as ttyUSB0
+        elif os.path.exists("/dev/ttyUSB0"):
+            return "/dev/ttyUSB0"
+    elif system == "darwin":  # macOS
+        # Look for USB-to-Serial adapters
+        ports = list(list_ports.comports())
+        for port in ports:
+            # Common USB-to-Serial adapter manufacturers
+            if any(
+                x in port.manufacturer.lower() if port.manufacturer else False
+                for x in ["silicon", "prolific", "ftdi"]
+            ):
+                return port.device
+        # If no USB-to-Serial adapter found, return a common macOS serial port
+        return "/dev/cu.usbserial"
+    elif system == "windows":
+        # Default to COM1 on Windows
+        return "COM1"
+
+    # Default fallback
+    return "/dev/ttyUSB0"
+
+
+DEFAULT_SERIAL_PORT = get_default_serial_port()
 DEFAULT_BAUD_RATE = 115200
 
 # --- Global state for the sensor module ---
@@ -65,6 +100,12 @@ def _motion_monitoring_loop(home_id: str) -> None:
         f"{log_prefix} Monitoring loop started for HOME_ID: {home_id} on port {DEFAULT_SERIAL_PORT}."
     )
 
+    if not os.path.exists(DEFAULT_SERIAL_PORT):
+        logger.error(
+            f"{log_prefix} Serial port {DEFAULT_SERIAL_PORT} does not exist. "
+            f"Available ports: {', '.join(port.device for port in list_ports.comports())}"
+        )
+
     first_reading_after_start = True
 
     while _is_monitoring.is_set():
@@ -73,6 +114,20 @@ def _motion_monitoring_loop(home_id: str) -> None:
                 f"{log_prefix} Serial connection lost or not open. Attempting to reconnect..."
             )
             try:
+                # List available ports for debugging
+                available_ports = list(list_ports.comports())
+                logger.info(
+                    f"{log_prefix} Available serial ports: {', '.join(port.device for port in available_ports)}"
+                )
+
+                if not os.path.exists(DEFAULT_SERIAL_PORT):
+                    logger.error(
+                        f"{log_prefix} Serial port {DEFAULT_SERIAL_PORT} does not exist. "
+                        "Please check your hardware connection or update the port configuration."
+                    )
+                    time.sleep(5)
+                    continue
+
                 _serial_connection = serial.Serial(
                     DEFAULT_SERIAL_PORT, DEFAULT_BAUD_RATE, timeout=1
                 )
@@ -81,7 +136,8 @@ def _motion_monitoring_loop(home_id: str) -> None:
                 )
             except serial.SerialException as e_serial:
                 logger.error(
-                    f"{log_prefix} Failed to re-open serial port {DEFAULT_SERIAL_PORT}: {e_serial}. Retrying in 5s."
+                    f"{log_prefix} Failed to re-open serial port {DEFAULT_SERIAL_PORT}: {e_serial}. "
+                    "Please check your hardware connection and permissions. Retrying in 5s."
                 )
                 time.sleep(5)
                 continue

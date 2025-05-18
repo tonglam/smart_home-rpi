@@ -9,15 +9,15 @@ User=root
 Group=root
 
 # Application directory
-WorkingDirectory=/home/adamslin/smart-home
+WorkingDirectory=/home/csseiot/smart-home
 
 # Python environment and application
-Environment="PATH=/home/adamslin/smart_home_env/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="PATH=/home/csseiot/smart_home_env/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 Environment="PYTHONUNBUFFERED=1"
-Environment="PYTHONPATH=/home/adamslin/smart-home"
+Environment="PYTHONPATH=/home/csseiot/smart-home"
 
 # Start the application using venv Python
-ExecStart=/home/adamslin/smart_home_env/bin/python src/main.py
+ExecStart=/home/csseiot/smart_home_env/bin/python src/main.py
 
 # Restart configuration
 Restart=always
