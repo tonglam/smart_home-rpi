@@ -10,16 +10,26 @@ R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
 
 
 R2_BUCKET_NAME = "smart-home"
-R2_ENDPOINT_URL = "https://72fa41884795a1310a5f1c0354a8b3f0.r2.cloudflarestorage.com"
+R2_ENDPOINT_URL = os.getenv(
+    "R2_ENDPOINT_URL",
+    "https://72fa41884795a1310a5f1c0354a8b3f0.r2.cloudflarestorage.com",
+)
 
 
 def get_r2_client():
     """Get the Cloudflare R2 client."""
+    # Ensure required environment variables are present for client creation
+    if not R2_ENDPOINT_URL or not R2_ACCESS_KEY_ID or not R2_SECRET_ACCESS_KEY:
+        logger.error(
+            "[Cloudflare] R2 client environment variables (ENDPOINT, KEY_ID, ACCESS_KEY) not fully configured."
+        )
+        return None
+
     return boto3.client(
         "s3",
-        endpoint_url=os.environ.get("R2_ENDPOINT_URL"),
-        aws_access_key_id=os.environ.get("R2_ACCESS_KEY_ID"),
-        aws_secret_access_key=os.environ.get("R2_SECRET_ACCESS_KEY"),
+        endpoint_url=R2_ENDPOINT_URL,
+        aws_access_key_id=R2_ACCESS_KEY_ID,
+        aws_secret_access_key=R2_SECRET_ACCESS_KEY,
     )
 
 
@@ -31,7 +41,12 @@ def upload_file_to_r2(local_file_path: str, remote_file_name: str = None) -> boo
 
     try:
         client = get_r2_client()
-        bucket_name = os.environ.get("R2_BUCKET_NAME")
+        if not client:
+            logger.error("[Cloudflare] Failed to get R2 client, cannot upload.")
+            return False
+
+        # Use the global constant for bucket name
+        bucket_name = R2_BUCKET_NAME
 
         if not remote_file_name:
             remote_file_name = f"{os.path.basename(local_file_path)}"

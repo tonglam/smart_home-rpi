@@ -30,7 +30,7 @@ DEVICE_TYPE = "camera"
 FRAME_WIDTH = 640
 FRAME_HEIGHT = 480
 FRAME_RATE = 30
-RECORDING_DURATION_SECONDS = 300  # 5 minutes
+RECORDING_DURATION_SECONDS = 30  # 5 minutes
 VIDEO_FILE_PATH = "recording.h264"
 
 # MQTT topics
@@ -137,11 +137,8 @@ def _process_and_publish_frame(frame: np.ndarray, home_id: str) -> None:
         )
 
 
-def _upload_recording_to_r2(home_id: str) -> bool:
+def _upload_recording_to_r2() -> bool:
     """Upload the recorded video file to R2 storage.
-
-    Args:
-        home_id: The ID of the home this camera belongs to
 
     Returns:
         bool: True if upload was successful, False otherwise
@@ -177,7 +174,7 @@ def _upload_recording_to_r2(home_id: str) -> bool:
 
 
 def _handle_recording(
-    home_id: str, current_time: float, recording_start_time: float, is_recording: bool
+    current_time: float, recording_start_time: float, is_recording: bool
 ) -> tuple[float, bool]:
     """Handle video recording operations.
 
@@ -211,7 +208,7 @@ def _handle_recording(
         logger.info(f"[{DEVICE_NAME}] Current recording stopped.")
 
         # Upload current recording to R2
-        _upload_recording_to_r2(home_id)
+        _upload_recording_to_r2()
 
         # Start new recording segment
         logger.info(f"[{DEVICE_NAME}] Starting new recording segment...")
@@ -283,7 +280,7 @@ def _camera_loop(home_id: str) -> None:
             current_time = time.time()
             try:
                 recording_start_time, is_recording = _handle_recording(
-                    home_id, current_time, recording_start_time, is_recording
+                    current_time, recording_start_time, is_recording
                 )
             except Exception as e_recording:
                 logger.error(
