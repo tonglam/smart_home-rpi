@@ -2,8 +2,7 @@ import threading
 import time
 from typing import Optional
 
-from smbus2 import SMBus  # For I2C communication
-from veml6030 import VEML6030  # Digital ambient light sensor
+from PiicoDev_VEML6030 import PiicoDev_VEML6030  # Digital ambient light sensor
 
 from src.utils.database import (
     get_device_by_id,
@@ -19,14 +18,11 @@ DEVICE_NAME = "Ambient Light Sensor"
 DEVICE_TYPE = "lux_sensor"
 
 # VEML6030 Configuration
-I2C_BUS = 1  # Raspberry Pi I2C bus number
-I2C_ADDRESS = 0x48  # Default VEML6030 I2C address
 GAIN = 1 / 8  # Set gain for appropriate range (1/8 for bright light)
 INTEGRATION_TIME = 100  # Integration time in ms (100ms is default)
 
 # Global state
-_sensor_instance: Optional[VEML6030] = None
-_i2c_bus: Optional[SMBus] = None
+_sensor_instance: Optional[PiicoDev_VEML6030] = None
 _monitoring_thread: Optional[threading.Thread] = None
 _is_monitoring = threading.Event()
 
@@ -52,7 +48,9 @@ def _read_lux_value() -> float:
 
     try:
         # Read lux value directly from sensor
-        lux = _sensor_instance.read_lux()
+        lux = (
+            _sensor_instance.read()
+        )  # PiicoDev_VEML6030 uses read() instead of read_lux()
         return lux
     except Exception as e:
         logger.error(f"[{DEVICE_NAME}] Error reading lux value: {e}")
@@ -61,7 +59,7 @@ def _read_lux_value() -> float:
 
 def _lux_monitoring_loop(home_id: str) -> None:
     """Internal loop that reads lux sensor data, processes, and logs it."""
-    global _sensor_instance, _i2c_bus
+    global _sensor_instance
     log_prefix = f"[{DEVICE_ID} ({DEVICE_NAME})]"
 
     logger.info(f"{log_prefix} Monitoring loop started for HOME_ID: {home_id}.")
@@ -70,25 +68,19 @@ def _lux_monitoring_loop(home_id: str) -> None:
     last_lux_value = None
 
     while _is_monitoring.is_set():
-        if _sensor_instance is None or _i2c_bus is None:
+        if _sensor_instance is None:
             logger.error(
                 f"{log_prefix} Sensor instance not available. Re-initializing..."
             )
             try:
-                _i2c_bus = SMBus(I2C_BUS)
-                _sensor_instance = VEML6030(_i2c_bus)
-                _sensor_instance.set_gain(GAIN)
-                _sensor_instance.set_integration_time(INTEGRATION_TIME)
-                logger.info(
-                    f"{log_prefix} Successfully re-initialized VEML6030 sensor on I2C address 0x{I2C_ADDRESS:02x}"
+                _sensor_instance = PiicoDev_VEML6030(
+                    gain=GAIN, integrationTime=INTEGRATION_TIME
                 )
+                logger.info(f"{log_prefix} Successfully re-initialized VEML6030 sensor")
             except Exception as e_init:
                 logger.error(
                     f"{log_prefix} Failed to re-initialize sensor: {e_init}. Retrying in 10s."
                 )
-                if _i2c_bus:
-                    _i2c_bus.close()
-                    _i2c_bus = None
                 _sensor_instance = None
                 time.sleep(10)
                 continue
@@ -150,13 +142,6 @@ def _lux_monitoring_loop(home_id: str) -> None:
             logger.error(
                 f"{log_prefix} An unexpected error occurred in the monitoring loop: {e_loop}"
             )
-            # Close and cleanup I2C on error
-            if _i2c_bus:
-                try:
-                    _i2c_bus.close()
-                except Exception:
-                    pass
-                _i2c_bus = None
             _sensor_instance = None
             time.sleep(10)
 
@@ -167,7 +152,7 @@ def _lux_monitoring_loop(home_id: str) -> None:
 
 def start_lux_monitoring(home_id: str) -> bool:
     """Initializes and starts the lux sensor monitoring."""
-    global _sensor_instance, _i2c_bus, _monitoring_thread, _is_monitoring
+    global _sensor_instance, _monitoring_thread, _is_monitoring
     log_prefix = f"[{DEVICE_ID} ({DEVICE_NAME})]"
 
     if _is_monitoring.is_set():
@@ -179,17 +164,11 @@ def start_lux_monitoring(home_id: str) -> bool:
     logger.info(f"{log_prefix} Attempting to start monitoring for HOME_ID: {home_id}")
 
     try:
-        # Initialize I2C and sensor
-        _i2c_bus = SMBus(I2C_BUS)
-        _sensor_instance = VEML6030(_i2c_bus)
-
-        # Configure sensor
-        _sensor_instance.set_gain(GAIN)
-        _sensor_instance.set_integration_time(INTEGRATION_TIME)
-
-        logger.info(
-            f"{log_prefix} VEML6030 sensor initialized on I2C address 0x{I2C_ADDRESS:02x}"
+        # Initialize sensor
+        _sensor_instance = PiicoDev_VEML6030(
+            gain=GAIN, integrationTime=INTEGRATION_TIME
         )
+        logger.info(f"{log_prefix} VEML6030 sensor initialized")
 
         # Test initial reading
         try:
@@ -231,12 +210,6 @@ def start_lux_monitoring(home_id: str) -> bool:
 
     except Exception as e_start:
         logger.error(f"{log_prefix} Error starting lux monitoring: {e_start}")
-        if _i2c_bus:
-            try:
-                _i2c_bus.close()
-            except Exception:
-                pass
-            _i2c_bus = None
         _sensor_instance = None
         _is_monitoring.clear()
         return False
@@ -244,7 +217,7 @@ def start_lux_monitoring(home_id: str) -> bool:
 
 def stop_lux_monitoring() -> None:
     """Stops the lux sensor monitoring."""
-    global _monitoring_thread, _is_monitoring, _sensor_instance, _i2c_bus
+    global _monitoring_thread, _is_monitoring, _sensor_instance
     log_prefix = f"[{DEVICE_ID} ({DEVICE_NAME})]"
 
     logger.info(f"{log_prefix} Attempting to stop lux monitoring...")
@@ -256,13 +229,7 @@ def stop_lux_monitoring() -> None:
         if _monitoring_thread.is_alive():
             logger.error(f"{log_prefix} Monitoring thread did not join in time.")
 
-    # Cleanup I2C resources
-    if _i2c_bus:
-        try:
-            _i2c_bus.close()
-        except Exception as e:
-            logger.error(f"{log_prefix} Error closing I2C bus: {e}")
-        _i2c_bus = None
+    # Cleanup sensor resources
     _sensor_instance = None
 
     logger.info(f"{log_prefix} Lux monitoring stopped and resources released.")

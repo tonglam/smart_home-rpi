@@ -12,5 +12,4 @@ RPi.GPIO
 picamera2==0.3.16
 PiicoDev
 pyserial==3.5
-veml6030==1.0.2
-smbus2==0.4.3
+PiicoDev_VEML6030
