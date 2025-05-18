@@ -198,6 +198,17 @@ def _camera_loop(home_id: str) -> None:
     Args:
         home_id: The ID of the home this camera belongs to
     """
+    # Log entry to the function immediately
+    try:
+        logger.info(
+            f"[{DEVICE_NAME}] THREAD_DEBUG: _camera_loop function entered for HOME_ID: {home_id}."
+        )
+    except Exception as e_log_init:
+        # Fallback print if logger itself has issues in thread context initially
+        print(
+            f"PRINT_DEBUG: [{DEVICE_ID}] _camera_loop entered, logger exception: {e_log_init}"
+        )
+
     global _picamera_object
 
     logger.info(f"[{DEVICE_NAME}] Camera loop thread started for HOME_ID: {home_id}.")
@@ -355,7 +366,19 @@ def start_camera_streaming(home_id: str) -> None:
         _camera_thread.daemon = (
             True  # Make thread daemon so it exits when main program exits
         )
+        logger.info(
+            f"[{DEVICE_NAME}] THREAD_DEBUG: Attempting to start _camera_thread..."
+        )
         _camera_thread.start()
+        # Check if thread is alive immediately after starting
+        if _camera_thread.is_alive():
+            logger.info(
+                f"[{DEVICE_NAME}] THREAD_DEBUG: _camera_thread.start() called and thread is alive."
+            )
+        else:
+            logger.error(
+                f"[{DEVICE_NAME}] THREAD_DEBUG: _camera_thread.start() was called BUT THREAD IS NOT ALIVE."
+            )
 
     except Exception as e:
         logger.error(f"[{DEVICE_NAME}] Error starting camera: {e}")
