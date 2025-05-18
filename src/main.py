@@ -1,3 +1,4 @@
+import os
 import signal
 import sys
 
@@ -8,7 +9,16 @@ from utils.database import get_user_id_for_home
 from utils.logger import logger
 from utils.mqtt import _mqtt_client_instance, get_mqtt_client
 
-load_dotenv()
+# Determine the path to the .env file (project root)
+dotenv_path = os.path.join(os.path.dirname(__file__), "..", ".env")
+loaded_dotenv = load_dotenv(dotenv_path=dotenv_path)
+
+if loaded_dotenv:
+    logger.info(f".env file loaded successfully from {dotenv_path}")
+else:
+    logger.warning(
+        f"Failed to load .env file from {dotenv_path}, or it was empty. Environment variables might not be set."
+    )
 
 if __name__ == "__main__":
     logger.info("Starting Smart Home Application...")
