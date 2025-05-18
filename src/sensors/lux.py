@@ -17,18 +17,48 @@ DEVICE_ID = "lux_sensor_01"
 DEVICE_NAME = "Ambient Light Sensor"
 DEVICE_TYPE = "lux_sensor"
 
+# ADC Configuration
+ADC_CHANNEL = 0  # Channel 0 of MCP3008
+REFERENCE_VOLTAGE = 3.3  # Reference voltage of Raspberry Pi
+LUX_SCALE_FACTOR = 1000.0  # Scale factor for converting voltage to lux
+
+# Global state
 _sensor_instance: Optional[MCP3008] = None
 _monitoring_thread: Optional[threading.Thread] = None
 _is_monitoring = threading.Event()
 
 
 def categorize_lux(lux_value: float) -> str:
+    """Categorize lux value into time of day."""
     if lux_value < 50:
         return "Night"
     elif lux_value < 300:
         return "Light Open"
     else:
         return "Day"
+
+
+def _read_lux_value() -> float:
+    """Read the current lux value from the sensor.
+
+    Returns:
+        float: The current lux value in lux units
+    """
+    if not _sensor_instance:
+        raise RuntimeError("Sensor not initialized")
+
+    # Read raw value (0-1)
+    raw_value = _sensor_instance.value
+
+    # Convert to voltage (0-3.3V)
+    voltage = raw_value * REFERENCE_VOLTAGE
+
+    # Convert voltage to lux using calibration factor
+    # The conversion depends on your specific light sensor
+    # Here we use a simple linear conversion
+    lux = voltage * LUX_SCALE_FACTOR
+
+    return lux
 
 
 def _lux_monitoring_loop(home_id: str) -> None:
@@ -39,6 +69,7 @@ def _lux_monitoring_loop(home_id: str) -> None:
     logger.info(f"{log_prefix} Monitoring loop started for HOME_ID: {home_id}.")
 
     first_reading_after_start = True
+    last_lux_value = None
 
     while _is_monitoring.is_set():
         if _sensor_instance is None:
@@ -46,8 +77,10 @@ def _lux_monitoring_loop(home_id: str) -> None:
                 f"{log_prefix} Sensor instance not available. Re-initializing..."
             )
             try:
-                _sensor_instance = MCP3008()
-                logger.info(f"{log_prefix} Successfully re-initialized sensor.")
+                _sensor_instance = MCP3008(channel=ADC_CHANNEL)
+                logger.info(
+                    f"{log_prefix} Successfully re-initialized sensor on channel {ADC_CHANNEL}."
+                )
             except Exception as e_init:
                 logger.error(
                     f"{log_prefix} Failed to re-initialize sensor: {e_init}. Retrying in 10s."
@@ -56,8 +89,16 @@ def _lux_monitoring_loop(home_id: str) -> None:
                 continue
 
         try:
-            lux = _sensor_instance.value * 1000  # Convert from 0-1 to milli-lux
-            logger.info(f"{log_prefix} Lux value: {lux}")
+            # Read current lux value
+            lux = _read_lux_value()
+
+            # Only log if value has changed significantly (>5% change)
+            if last_lux_value is None or abs(lux - last_lux_value) > (
+                last_lux_value * 0.05
+            ):
+                logger.info(f"{log_prefix} Lux value: {lux:.1f}")
+                last_lux_value = lux
+
             current_status_str = categorize_lux(lux)
 
             old_state_str = get_latest_device_state(
@@ -66,7 +107,7 @@ def _lux_monitoring_loop(home_id: str) -> None:
 
             if first_reading_after_start and old_state_str is None:
                 logger.info(
-                    f"{log_prefix} First state detected after start: '{current_status_str}' ({lux:.2f} lux). Previous state not recorded or device is new. Logging event."
+                    f"{log_prefix} First state detected after start: '{current_status_str}' ({lux:.1f} lux). Previous state not recorded or device is new. Logging event."
                 )
                 update_device_state(device_id=DEVICE_ID, new_state=current_status_str)
                 insert_event(
@@ -75,6 +116,7 @@ def _lux_monitoring_loop(home_id: str) -> None:
                     event_type="lux_level",
                     old_state=None,
                     new_state=current_status_str,
+                    event_data={"lux": lux},
                 )
                 first_reading_after_start = False
             elif old_state_str != current_status_str:
@@ -84,7 +126,7 @@ def _lux_monitoring_loop(home_id: str) -> None:
                     else "not previously recorded"
                 )
                 logger.info(
-                    f"{log_prefix} State changed from '{log_message_old_state}' to '{current_status_str}' ({lux:.2f} lux). Logging event."
+                    f"{log_prefix} State changed from '{log_message_old_state}' to '{current_status_str}' ({lux:.1f} lux). Logging event."
                 )
                 update_device_state(device_id=DEVICE_ID, new_state=current_status_str)
                 insert_event(
@@ -93,8 +135,8 @@ def _lux_monitoring_loop(home_id: str) -> None:
                     event_type="lux_level",
                     old_state=old_state_str,
                     new_state=current_status_str,
+                    event_data={"lux": lux},
                 )
-                first_reading_after_start = False
             else:
                 if first_reading_after_start:
                     first_reading_after_start = False
@@ -124,11 +166,21 @@ def start_lux_monitoring(home_id: str) -> bool:
     logger.info(f"{log_prefix} Attempting to start monitoring for HOME_ID: {home_id}")
 
     try:
-        _sensor_instance = MCP3008()
-        logger.info(f"{log_prefix} MCP3008 sensor initialized.")
+        _sensor_instance = MCP3008(channel=ADC_CHANNEL)
+        logger.info(
+            f"{log_prefix} MCP3008 sensor initialized on channel {ADC_CHANNEL}."
+        )
+
+        # Test initial reading
+        try:
+            initial_lux = _read_lux_value()
+            logger.info(f"{log_prefix} Initial lux reading: {initial_lux:.1f}")
+        except Exception as e_test:
+            logger.error(f"{log_prefix} Failed to get initial reading: {e_test}")
+            raise
 
         device = get_device_by_id(DEVICE_ID)
-        initial_state = "unknown"
+        initial_state = categorize_lux(initial_lux)
         if not device:
             logger.info(
                 f"{log_prefix} Device not found in DB. Registering with DEVICE_ID: {DEVICE_ID}, NAME: '{DEVICE_NAME}'..."
@@ -142,9 +194,9 @@ def start_lux_monitoring(home_id: str) -> bool:
             )
             logger.info(f"{log_prefix} Device registered successfully.")
         else:
-            initial_state = device.get("currentState", "unknown")
+            update_device_state(device_id=DEVICE_ID, new_state=initial_state)
             logger.info(
-                f"{log_prefix} Device found in DB with current state: {initial_state}"
+                f"{log_prefix} Device found in DB. Updated state to: {initial_state}"
             )
 
         _is_monitoring.set()
@@ -160,8 +212,7 @@ def start_lux_monitoring(home_id: str) -> bool:
     except Exception as e_start:
         logger.error(f"{log_prefix} Error starting lux monitoring: {e_start}")
         if _sensor_instance:
-            pass
-        _sensor_instance = None
+            _sensor_instance = None
         _is_monitoring.clear()
         return False
 
