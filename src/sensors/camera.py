@@ -539,7 +539,6 @@ def _update_camera_state(home_id: str, new_state: str, message: str) -> None:
             event_type="camera_state_changed",
             old_state=old_state,
             new_state=new_state,
-            event_data={"message": message},
         )
 
         logger.info(f"[{DEVICE_NAME}] State updated to {new_state}: {message}")
