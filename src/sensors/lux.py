@@ -17,10 +17,6 @@ DEVICE_ID = "lux_sensor_01"
 DEVICE_NAME = "Ambient Light Sensor"
 DEVICE_TYPE = "lux_sensor"
 
-# VEML6030 Configuration
-GAIN = 1 / 8  # Set gain for appropriate range (1/8 for bright light)
-INTEGRATION_TIME = 100  # Integration time in ms (100ms is default)
-
 # Global state
 _sensor_instance: Optional[PiicoDev_VEML6030] = None
 _monitoring_thread: Optional[threading.Thread] = None
@@ -48,9 +44,7 @@ def _read_lux_value() -> float:
 
     try:
         # Read lux value directly from sensor
-        lux = (
-            _sensor_instance.read()
-        )  # PiicoDev_VEML6030 uses read() instead of read_lux()
+        lux = _sensor_instance.read()
         return lux
     except Exception as e:
         logger.error(f"[{DEVICE_NAME}] Error reading lux value: {e}")
@@ -73,9 +67,7 @@ def _lux_monitoring_loop(home_id: str) -> None:
                 f"{log_prefix} Sensor instance not available. Re-initializing..."
             )
             try:
-                _sensor_instance = PiicoDev_VEML6030(
-                    gain=GAIN, integrationTime=INTEGRATION_TIME
-                )
+                _sensor_instance = PiicoDev_VEML6030()
                 logger.info(f"{log_prefix} Successfully re-initialized VEML6030 sensor")
             except Exception as e_init:
                 logger.error(
@@ -165,9 +157,7 @@ def start_lux_monitoring(home_id: str) -> bool:
 
     try:
         # Initialize sensor
-        _sensor_instance = PiicoDev_VEML6030(
-            gain=GAIN, integrationTime=INTEGRATION_TIME
-        )
+        _sensor_instance = PiicoDev_VEML6030()
         logger.info(f"{log_prefix} VEML6030 sensor initialized")
 
         # Test initial reading

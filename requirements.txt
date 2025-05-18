@@ -12,4 +12,4 @@ RPi.GPIO
 picamera2==0.3.16
 PiicoDev
 pyserial==3.5
-PiicoDev_VEML6030
+piicodev
