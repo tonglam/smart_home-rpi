@@ -61,7 +61,7 @@ if __name__ == "__main__":
         logger.info("[Main] Cleaning up resources...")
         reed.stop_reed_monitoring()
         sound.stop_sound_monitoring()
-        camera.stop_camera_streaming(app_home_id)
+        # camera.stop_camera_streaming(app_home_id)
         lux.stop_lux_monitoring()
         motion.stop_motion_monitoring()
         light.cleanup_light()
