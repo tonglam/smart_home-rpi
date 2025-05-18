@@ -178,7 +178,6 @@ def insert_device(
     type: str,
     current_state: str,
     location: str | None = None,
-    mode: str | None = None,
     brightness: int | None = None,
 ) -> dict:
     """Inserts a new device into the devices table."""
@@ -189,8 +188,7 @@ def insert_device(
             "home_id": home_id,
             "name": name,
             "type": type,
-            "location": location,
-            "mode": mode,
+            "location": location or "unknown",  # location is required in schema
             "current_state": current_state,
             "brightness": brightness,
             "created_at": now_iso,
@@ -198,7 +196,7 @@ def insert_device(
         }
 
         response = get_supabase_client().table("devices").insert(device_data).execute()
-        logger.info(f"Device inserted: {response.data}")
+        logger.info(f"Device inserted into devices table: {response.data}")
         return response.data[0] if response.data else {}
     except Exception as e:
         logger.error(f"DB insert error (devices): {e}")
