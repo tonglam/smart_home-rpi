@@ -1,172 +1,423 @@
 # Smart Home RPi Deployment Guide
 
-This guide explains how to deploy the Smart Home RPi application using Docker on a fresh Raspberry Pi OS installation.
-
-## Fresh Installation Steps (For New Raspberry Pi)
-
-### 1. Initial Setup
-
-First, ensure your Raspberry Pi is running and connected to the internet. Open a terminal and run:
+## 1. Check Your System
 
 ```bash
-# Update the system
+# Check CPU architecture and userspace
+uname -m          # Shows CPU architecture
+getconf LONG_BIT  # Shows userspace bit width
+
+# Important: We use 32-bit (armv7) for best compatibility
+# Even if your system shows aarch64, we'll use armv7
+```
+
+**Always use armv7 (32-bit) version:**
+
+- If `armv7l` → Use `latest-armv7` ✓
+- If `aarch64` → Still use `latest-armv7` ✓ (for better GPIO compatibility)
+
+## 2. Install Dependencies
+
+```bash
+# System packages
+sudo apt-get update && sudo apt-get upgrade -y
+sudo apt-get install -y \
+    python3-pip \
+    python3-venv \
+    python3-full \
+    python3-numpy \
+    python3-pil \
+    libcap-dev \
+    ffmpeg \
+    libjpeg-dev \
+    zlib1g-dev \
+    libtiff-dev \
+    libfreetype6-dev \
+    liblcms2-dev \
+    libwebp-dev \
+    libjpeg62-turbo-dev \
+    libopenjp2-7-dev
+
+# Camera dependencies
+# First, remove any existing camera packages
+sudo apt-get remove -y \
+    python3-libcamera \
+    python3-picamera2 \
+    libcamera-tools \
+    libcamera-dev
+
+# Clean up
+sudo apt-get autoremove -y
+sudo apt-get clean
+
+# Update system
 sudo apt-get update
 sudo apt-get upgrade -y
+sudo apt-get dist-upgrade -y
 
-# Install required dependencies
-sudo apt-get install -y curl git
-```
+# Install camera stack
+sudo apt-get install -y \
+    libcamera0 \
+    libcamera-apps-lite \
+    python3-libcamera \
+    python3-picamera2 \
+    libcamera-tools \
+    python3-kms++ \
+    python3-prctl
 
-### 2. Install Docker
+# Enable camera interface (Method 1 - Using raspi-config)
+sudo raspi-config  # Navigate to Interface Options > Camera > Enable
 
-Install Docker using the official installation script:
+# Enable camera interface (Method 2 - Non-interactive)
+sudo sed -i 's/^camera_auto_detect=.*/camera_auto_detect=1/' /boot/config.txt
+sudo sed -i 's/^dtoverlay=vc4-kms-v3d.*/dtoverlay=vc4-kms-v3d/' /boot/config.txt
 
-```bash
-# Download and run Docker installation script
-curl -fsSL https://get.docker.com -o get-docker.sh
-sudo sh get-docker.sh
-
-# Add your user to the docker group
-sudo usermod -aG docker $USER
-
-# Important: Reboot for changes to take effect
+# Important: Reboot after installation
 sudo reboot
+
+# Check camera interface (modern method)
+ls -l /dev/video*  # Should show video devices
+libcamera-hello --list-cameras  # List available cameras
+
+# Setup Python virtual environment with system packages
+python3 -m venv ~/smart_home_env --system-site-packages
+source ~/smart_home_env/bin/activate
+
+# Install Python packages in virtual environment
+pip3 install --no-cache-dir RPi.GPIO gpiozero
 ```
 
-### 3. Install Docker Compose
-
-After the reboot, install Docker Compose:
+## 3. Deploy Application
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y docker-compose
-```
-
-### 4. Deploy Smart Home Application
-
-Now set up the application:
-
-```bash
-# Create application directory
-mkdir smart-home
+# Setup
+cd ~
+git clone https://github.com/tonglam/smart_home-rpi.git smart-home
 cd smart-home
 
-# Create required files and directories
-mkdir logs
-curl -O https://raw.githubusercontent.com/tonglam/smart_home-rpi/main/docker-compose.yml
-curl -O https://raw.githubusercontent.com/tonglam/smart_home-rpi/main/.env.example
-mv .env.example .env
+# Activate virtual environment and install requirements
+source ~/smart_home_env/bin/activate
+pip3 install -r requirements.txt
 
-# Edit your environment configuration
-nano .env
+# Configure
+cp .env.example .env
+nano .env  # Edit configuration
 
-# Pull and start the container
-docker-compose pull
-docker-compose up -d
+# Create systemd service
+sudo tee /etc/systemd/system/smart-home.service << EOF
+[Unit]
+Description=Smart Home Service
+After=network.target
+
+[Service]
+Type=simple
+User=$USER
+Group=$USER
+WorkingDirectory=/home/$USER/smart-home
+Environment=PATH=/home/$USER/smart_home_env/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/home/$USER/smart_home_env/bin/python src/main.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Set proper permissions
+sudo chmod 644 /etc/systemd/system/smart-home.service
+
+# Enable and start the service
+sudo systemctl daemon-reload
+sudo systemctl enable smart-home
+sudo systemctl start smart-home
 ```
 
-### 5. Verify Installation
+## 4. Common Commands
 
-Check if everything is running correctly:
+Service Management:
 
 ```bash
-# Check container status
-docker-compose ps
-
-# View logs
-docker-compose logs
+sudo systemctl start smart-home    # Start service
+sudo systemctl stop smart-home     # Stop service
+sudo systemctl restart smart-home  # Restart service
+sudo systemctl status smart-home   # Check status
 ```
 
-## Managing the Application
-
-### View Logs
+Logs:
 
 ```bash
-# View logs
-docker-compose logs
+# View service logs
+sudo journalctl -u smart-home -f
 
-# Follow logs
-docker-compose logs -f
+# View application logs
+tail -f ~/smart-home/logs/smart_home.log
 ```
 
-### Update the Application
+Update:
 
 ```bash
-# Pull the latest version
-docker-compose pull
+# Stop service
+sudo systemctl stop smart-home
 
-# Restart with the new version
-docker-compose up -d
+# Update code
+cd ~/smart-home
+git pull
+
+# Update dependencies
+source ~/smart_home_env/bin/activate
+pip3 install -r requirements.txt
+
+# Start service
+sudo systemctl start smart-home
 ```
 
-### Stop the Application
+## Environment Variables Configuration
+
+When copying `.env.example` to `.env`, configure these variables:
 
 ```bash
-docker-compose down
-```
+# Application Settings
+APP_NAME=smart_home
+LOG_LEVEL=INFO
+TIMEZONE=UTC
 
-### Check Status
+# MQTT Configuration
+MQTT_BROKER=localhost
+MQTT_PORT=1883
+MQTT_USERNAME=
+MQTT_PASSWORD=
+MQTT_TOPIC_PREFIX=home
 
-```bash
-docker-compose ps
+# AWS Configuration (if using)
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
+AWS_REGION=us-west-2
+
+# Supabase Configuration
+SUPABASE_URL=
+SUPABASE_KEY=
+
+# Sensor Configuration
+SENSOR_READ_INTERVAL=60  # seconds
+ENABLE_TEMPERATURE=true
+ENABLE_HUMIDITY=true
+ENABLE_MOTION=true
+ENABLE_CAMERA=false
+
+# GPIO Pin Assignments
+TEMP_SENSOR_PIN=4
+HUMIDITY_SENSOR_PIN=17
+MOTION_SENSOR_PIN=18
+
+# Camera Settings (if enabled)
+CAMERA_RESOLUTION=1920x1080
+CAMERA_ROTATION=0
+CAMERA_FRAMERATE=30
 ```
 
 ## Troubleshooting
 
-### GPIO Access Issues
-
-If you encounter GPIO access issues, ensure that:
-
-1. The container is running with `privileged: true`
-2. The GPIO device is properly mounted
-3. The user has the right permissions
-
-### Camera Issues
-
-If the camera is not working:
-
-1. Ensure the camera is enabled in raspi-config: `sudo raspi-config`
-2. Check that the camera module is properly connected
-3. Verify the camera device is properly mounted in docker-compose.yml
-
-### Network Issues
-
-If you experience network connectivity issues:
-
-1. Check your network configuration in .env
-2. Verify that required ports are not blocked
-3. Ensure Docker has network access
-
-For more help, check the logs using `docker-compose logs` or file an issue on the GitHub repository.
-
-## Security Best Practices
-
-1. Keep your `.env` file secure and never commit it to version control
-2. Regularly update your system: `sudo apt-get update && sudo apt-get upgrade`
-3. Update Docker images regularly: `docker-compose pull`
-4. Monitor system logs for any suspicious activity
-5. Back up your configuration files regularly
-6. Use strong passwords in your .env file
-7. Keep your Raspberry Pi's operating system updated
-
-## Monitoring and Maintenance
-
-### Container Management
-
-- View logs:
+GPIO Issues:
 
 ```bash
-docker-compose logs -f
+# Check GPIO permissions
+ls -l /dev/gpiomem
+sudo usermod -a -G gpio $USER
+groups  # Should show 'gpio'
+
+# Test GPIO access
+python3 -c "import RPi.GPIO as GPIO; print('GPIO available')"
 ```
 
-- Check container status:
+Service Issues:
 
 ```bash
-docker-compose ps
+# Check service status
+sudo systemctl status smart-home
+
+# Check detailed logs
+sudo journalctl -u smart-home -n 100 --no-pager
+
+# Restart service
+sudo systemctl restart smart-home
+
+# Check service configuration
+sudo systemctl cat smart-home
 ```
 
-- View resource usage:
+Python Environment Issues:
 
 ```bash
-docker stats
+# Recreate virtual environment
+rm -rf ~/smart_home_env
+python3 -m venv ~/smart_home_env --system-site-packages
+source ~/smart_home_env/bin/activate
+pip3 install -r requirements.txt
+```
+
+Camera Issues:
+
+```bash
+# 1. Check camera hardware detection
+ls -l /dev/video*  # Should show video devices like /dev/video0
+libcamera-hello --list-cameras  # List detected cameras
+
+# 2. Test camera with libcamera tools
+libcamera-hello  # Should show camera preview
+libcamera-jpeg -o test.jpg  # Try to capture an image
+
+# 3. Check camera permissions
+ls -l /dev/video*  # Check video device permissions
+sudo usermod -a -G video $USER  # Add user to video group
+groups  # Verify user is in video group
+
+# 4. Check camera configuration
+cat /boot/config.txt | grep -E "camera|dtoverlay"
+# Should show:
+# camera_auto_detect=1
+# dtoverlay=vc4-kms-v3d
+
+# 5. If camera is not detected, try:
+sudo nano /boot/config.txt
+# Add or modify these lines:
+camera_auto_detect=1
+dtoverlay=vc4-kms-v3d
+
+# 6. Test with Python
+python3 -c "from picamera2 import Picamera2; Picamera2.global_camera_info()"
+
+# 7. Reinstall camera packages if needed
+sudo apt-get update
+sudo apt-get install --reinstall \
+    python3-libcamera \
+    python3-picamera2 \
+    libcamera-tools \
+    libcamera-dev
+
+# Note: After any config.txt changes or group modifications
+sudo reboot
+```
+
+Note: Modern Raspberry Pi OS uses libcamera instead of the legacy camera stack. The `vcgencmd` command is no longer used for camera detection. Use `libcamera-hello` and related tools instead.
+
+## Service Setup
+
+```bash
+# 1. Create logs directory
+mkdir -p ~/smart-home/logs
+
+# 2. Create service file
+sudo tee /etc/systemd/system/smart-home.service << 'EOF'
+[Unit]
+Description=Smart Home RPi Service
+After=network.target
+Wants=network-online.target
+
+[Service]
+# Service will run as the specified user
+User=adamslin
+Group=adamslin
+
+# Application directory
+WorkingDirectory=/home/adamslin/smart-home
+
+# Python environment and application
+Environment="PATH=/home/adamslin/smart_home_env/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+
+# Start the application
+ExecStart=/home/adamslin/smart_home_env/bin/python src/main.py
+
+# Restart configuration
+Restart=always
+RestartSec=5
+
+# Give the service time to start
+TimeoutStartSec=30
+
+# Use a dedicated process group
+KillMode=process
+
+# Logging
+StandardOutput=append:/home/adamslin/smart-home/logs/smart-home.log
+StandardError=append:/home/adamslin/smart-home/logs/smart-home.error.log
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# 3. Set proper permissions
+sudo chmod 644 /etc/systemd/system/smart-home.service
+
+# 4. Reload systemd and enable service
+sudo systemctl daemon-reload
+sudo systemctl enable smart-home
+sudo systemctl start smart-home
+
+# 5. Check service status
+sudo systemctl status smart-home
+```
+
+Note: Replace `adamslin` in the service file with your actual username. You can find your username by running `echo $USER`.
+
+## Git Setup and Updates
+
+### Initial Git Setup
+
+```bash
+# Install latest Git (recommended)
+sudo apt-get update
+sudo apt-get install -y git
+
+# Configure Git
+git config --global user.name "Your Name"
+git config --global user.email "your.email@example.com"
+
+# Optional: Store credentials (be careful with this on shared systems)
+git config --global credential.helper store
+```
+
+### Updating Code
+
+```bash
+# 1. Stop the service
+sudo systemctl stop smart-home
+
+# 2. Backup local changes (if any)
+cd ~/smart-home
+git status  # Check for local changes
+git stash   # Backup local changes if needed
+
+# 3. Update from repository
+git fetch origin
+git reset --hard origin/main  # or origin/master, depending on your branch
+
+# 4. Update dependencies
+source ~/smart_home_env/bin/activate
+pip install -r requirements.txt
+
+# 5. Restart service
+sudo systemctl start smart-home
+
+# 6. Verify update
+sudo systemctl status smart-home
+tail -f ~/smart-home/logs/smart-home.log
+```
+
+### Common Git Issues
+
+```bash
+# If Git asks for credentials repeatedly
+git config --global credential.helper store
+
+# If you need to reset local changes
+git fetch origin
+git reset --hard origin/main
+
+# If you need to clean untracked files
+git clean -fd  # Warning: This deletes untracked files!
+
+# If you need to update Git itself
+sudo apt-get update
+sudo apt-get install --only-upgrade git
 ```

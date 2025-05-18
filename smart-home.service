@@ -1,0 +1,36 @@
+[Unit]
+Description=Smart Home RPi Service
+After=network.target
+Wants=network-online.target
+
+[Service]
+# Service will run as the specified user
+User=adamslin
+Group=adamslin
+
+# Application directory
+WorkingDirectory=/home/adamslin/smart-home
+
+# Python environment and application
+Environment="PATH=/home/adamslin/smart_home_env/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+
+# Start the application
+ExecStart=/home/adamslin/smart_home_env/bin/python src/main.py
+
+# Restart configuration
+Restart=always
+RestartSec=5
+
+# Give the service time to start
+TimeoutStartSec=30
+
+# Use a dedicated process group
+KillMode=process
+
+# Logging
+StandardOutput=append:/home/adamslin/smart-home/logs/smart-home.log
+StandardError=append:/home/adamslin/smart-home/logs/smart-home.error.log
+
+[Install]
+WantedBy=multi-user.target 
