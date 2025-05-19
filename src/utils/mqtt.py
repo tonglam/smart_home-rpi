@@ -90,8 +90,8 @@ def _handle_light_control_message(payload: dict) -> None:
             # Map brightness percentages from MQTT to PWMLED intensity levels (0.0-1.0)
             intensity_map = {
                 0: 0.0,  # Off
-                25: 0.2,  # Low
-                50: 0.4,  # Medium
+                25: 0.1,  # Low
+                50: 0.3,  # Medium
                 75: 0.75,  # Medium-High
                 100: 1.0,  # Full
             }
