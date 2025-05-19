@@ -4,6 +4,9 @@ import os
 import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
 
+from src.sensors.camera import start_camera_streaming, stop_camera_streaming
+from src.sensors.light import set_light_intensity, turn_light_off, turn_light_on
+from src.utils.database import get_user_id_for_home
 from src.utils.logger import logger
 
 load_dotenv()
@@ -61,7 +64,6 @@ def _handle_light_control_message(payload: dict) -> None:
         "createdAt": "2025-05-16T18:35:17.251Z"
     }
     """
-    from src.sensors.light import set_light_intensity, turn_light_off, turn_light_on
 
     try:
         logger.info(f"[MQTT] Received light control payload: {payload}")
@@ -148,7 +150,6 @@ def _handle_light_control_message(payload: dict) -> None:
         "createdAt": "2025-05-16T18:35:17.251Z"
     }
     """
-    from src.sensors.light import set_light_intensity, turn_light_off, turn_light_on
 
     try:
         logger.info(f"[MQTT] Received light control payload: {payload}")
@@ -217,8 +218,6 @@ def _handle_automation_control_message(payload: dict) -> None:
         "created_at": "2025-05-16T18:39:59.196Z"
     }
     """
-    from src.sensors.light import turn_light_off
-    from src.utils.database import get_user_id_for_home
 
     try:
         # Validate required fields
@@ -247,9 +246,8 @@ def _handle_automation_control_message(payload: dict) -> None:
                 f"[MQTT] Movie mode {'activated' if is_active else 'deactivated'} for home {home_id}"
             )
             if is_active:
-                # When movie mode is activated, turn off the light
-                turn_light_off(home_id, user_id)
-                logger.info("[MQTT] Turned off lights for movie mode")
+                set_light_intensity(home_id, 0.2)
+                logger.info("[MQTT] Turned on lights for movie mode to watch a movie")
 
     except Exception as e:
         logger.error(f"[MQTT] Error handling automation control message: {e}")
@@ -267,7 +265,6 @@ def _handle_camera_control_message(payload: dict) -> None:
         "createdAt": "2025-05-19T16:48:47.667Z"
     }
     """
-    from src.sensors.camera import start_camera_streaming, stop_camera_streaming
 
     try:
         logger.info(f"[MQTT] Received camera control payload: {payload}")
