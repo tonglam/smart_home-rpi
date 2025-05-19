@@ -56,7 +56,7 @@ def _on_door_opened_logic(
     if home_mode == "away":
         alert_message = "Security Alert: Door opened while home is in away mode!"
         logger.warning(f"[{DEVICE_NAME}] {alert_message}")
-        if user_id:  # Ensure user_id is present before inserting alert
+        if user_id:
             insert_alert(
                 home_id=home_id,
                 user_id=user_id,
@@ -69,9 +69,7 @@ def _on_door_opened_logic(
             )
 
 
-def _on_door_closed_logic(
-    home_id: str, user_id: Optional[str], old_state_from_loop: Optional[str]
-):
+def _on_door_closed_logic(home_id: str, old_state_from_loop: Optional[str]):
     """Handles logic when the door transitions to a closed state."""
     logger.info(f"[{DEVICE_NAME}] Door closed detected.")
     update_device_state(DEVICE_ID, "closed")
@@ -98,7 +96,6 @@ def _reed_monitoring_loop(home_id: str, user_id: Optional[str]):
         f"[{DEVICE_NAME}] Reed switch monitoring loop started for HOME_ID: {home_id}."
     )
 
-    # Initialize _last_state based on current sensor reading or database
     try:
         pin_signal_init = GPIO.input(REED_PIN)
         pin_is_low_init = pin_signal_init == GPIO.LOW
@@ -120,24 +117,22 @@ def _reed_monitoring_loop(home_id: str, user_id: Optional[str]):
                 pin_signal = GPIO.input(REED_PIN)
                 pin_is_low = pin_signal == GPIO.LOW
             except RuntimeError as e:
-                # This can happen if GPIOs are not set up or cleaned up unexpectedly
                 logger.error(
                     f"[{DEVICE_NAME}] RuntimeError reading GPIO pin {REED_PIN}: {e}. Attempting to re-setup.",
                     exc_info=True,
                 )
                 try:
-                    # Attempt to re-initialize GPIO settings for this pin
                     GPIO.setmode(GPIO.BCM)  # Ensure mode is set
                     GPIO.setup(REED_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
                     logger.info(f"[{DEVICE_NAME}] Re-initialized GPIO pin {REED_PIN}.")
-                    time.sleep(1)  # Wait a bit after re-setup
-                    continue  # Retry reading in the next loop iteration
+                    time.sleep(1)
+                    continue
                 except Exception as re_setup_e:
                     logger.critical(
                         f"[{DEVICE_NAME}] Failed to re-setup GPIO pin {REED_PIN}: {re_setup_e}. Stopping loop.",
                         exc_info=True,
                     )
-                    break  # Exit loop if re-setup fails
+                    break
 
             current_door_state = "closed" if pin_is_low else "open"
 
@@ -149,8 +144,8 @@ def _reed_monitoring_loop(home_id: str, user_id: Optional[str]):
                     )
                     if current_door_state == "open":
                         _on_door_opened_logic(home_id, user_id, _last_state)
-                    else:  # current_door_state == "closed"
-                        _on_door_closed_logic(home_id, user_id, _last_state)
+                    else:
+                        _on_door_closed_logic(home_id, _last_state)
                     _last_event_time = current_time
                 else:
                     logger.debug(
@@ -158,7 +153,7 @@ def _reed_monitoring_loop(home_id: str, user_id: Optional[str]):
                         f"suppressed due to cooldown. Last event: {_last_event_time:.2f}, Current: {current_time:.2f}"
                     )
                 _last_state = current_door_state
-            time.sleep(0.1)  # Polling interval
+            time.sleep(0.1)
     except Exception as e:
         logger.error(
             f"[{DEVICE_NAME}] Unhandled error in monitoring loop: {e}", exc_info=True
@@ -182,28 +177,22 @@ def start_reed_monitoring(home_id: str, user_id: Optional[str]) -> None:
     )
 
     try:
-        # GPIO setup using RPi.GPIO
-        # Check if another part of the application might have already set the mode.
-        # This is a simple check; a more robust system might use a global GPIO manager.
         current_gpio_mode = GPIO.getmode()
-        if current_gpio_mode is None:  # Mode not set
+        if current_gpio_mode is None:
             GPIO.setmode(GPIO.BCM)
             logger.info(f"[{DEVICE_NAME}] RPi.GPIO mode set to BCM.")
-            _gpio_initialized_by_this_module = (
-                True  # Mark that this module set the mode
-            )
+            _gpio_initialized_by_this_module = True
         elif current_gpio_mode != GPIO.BCM:
             logger.warning(
                 f"[{DEVICE_NAME}] RPi.GPIO mode was already set to {current_gpio_mode} (expected BCM). Proceeding with existing mode."
             )
-            # If it was BOARD, our REED_PIN number might be wrong. This is a potential conflict.
         else:
             logger.info(f"[{DEVICE_NAME}] RPi.GPIO mode already BCM.")
 
         GPIO.setup(REED_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
         logger.info(f"[{DEVICE_NAME}] GPIO pin {REED_PIN} setup as IN with PUD_UP.")
 
-        _last_event_time = 0  # Reset cooldown timer on start
+        _last_event_time = 0
 
         device = get_device_by_id(DEVICE_ID)
         if not device:
@@ -255,8 +244,6 @@ def start_reed_monitoring(home_id: str, user_id: Optional[str]) -> None:
     except Exception as e:
         logger.error(f"[{DEVICE_NAME}] Error starting monitoring: {e}", exc_info=True)
         _is_monitoring.clear()
-        # No specific _reed_device to close, but RPi.GPIO cleanup is tricky here.
-        # If this module set GPIO.setmode, it could clean up, but not if mode was pre-existing.
 
 
 def stop_reed_monitoring() -> None:
@@ -271,20 +258,5 @@ def stop_reed_monitoring() -> None:
             logger.warning(f"[{DEVICE_NAME}] Monitoring thread did not finish in time.")
         _monitoring_thread = None
 
-    # RPi.GPIO cleanup is complex for a module.
-    # GPIO.cleanup() affects all channels. Calling it here might affect other modules.
-    # If this module exclusively set the mode via GPIO.setmode(), it could call GPIO.cleanup().
-    # For now, we are not calling GPIO.cleanup() here to avoid side effects.
-    # The pin remains setup as IN. OS will reclaim on process exit.
-    # if _gpio_initialized_by_this_module:
-    #     try:
-    #         GPIO.cleanup(REED_PIN) # Clean up only this channel if possible/desired
-    #         logger.info(f"[{DEVICE_NAME}] GPIO pin {REED_PIN} cleaned up.")
-    #     except Exception as e:
-    #         logger.error(f"[{DEVICE_NAME}] Error during GPIO cleanup for pin {REED_PIN}: {e}")
-    # _gpio_initialized_by_this_module = False
-
-    _last_state = None  # Reset last_state
-    logger.info(
-        f"[{DEVICE_NAME}] Monitoring stopped."
-    )  # Removed "and resources cleaned up" as GPIO isn't cleaned by this func
+    _last_state = None
+    logger.info(f"[{DEVICE_NAME}] Monitoring stopped.")

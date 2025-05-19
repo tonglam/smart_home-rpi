@@ -5,6 +5,8 @@ from gpiozero import PWMLED
 
 from src.utils.database import (
     get_device_by_id,
+    get_home_mode,
+    insert_alert,
     insert_device,
     insert_event,
     update_device_state,
@@ -30,13 +32,10 @@ def initialize_light(home_id: str, user_id: str) -> None:
 
     try:
         with _led_lock:
-            # Initialize GPIO
             _led = PWMLED(LED_PIN)
 
-            # Check if device exists
             device = get_device_by_id(DEVICE_ID)
             if not device:
-                # First time initialization - register the device
                 logger.info(
                     f"[{DEVICE_NAME}] First time initialization. Registering device..."
                 )
@@ -56,12 +55,10 @@ def initialize_light(home_id: str, user_id: str) -> None:
                     f"[{DEVICE_NAME}] Device registered with state: {current_state_str}, brightness: {brightness_int}%"
                 )
             else:
-                # Device exists - update its state to match hardware
                 current_intensity_float = _led.value
                 current_state_str = "on" if current_intensity_float > 0.0 else "off"
                 brightness_int = int(current_intensity_float * 100)
 
-                # Update device state if different from hardware state
                 db_state = device.get("current_state")
                 db_brightness = device.get("brightness", 0)
 
@@ -75,7 +72,6 @@ def initialize_light(home_id: str, user_id: str) -> None:
                     }
                     update_device_state(DEVICE_ID, update_payload)
 
-                    # Log the state change event
                     insert_event(
                         home_id=home_id,
                         device_id=DEVICE_ID,
@@ -94,7 +90,7 @@ def initialize_light(home_id: str, user_id: str) -> None:
         raise
 
 
-def set_light_intensity(home_id: str, level: float):
+def set_light_intensity(home_id: str, level: float, user_id: str = None):
     """Set the light intensity to a specific level."""
     with _led_lock:
         if _led is None:
@@ -127,6 +123,21 @@ def set_light_intensity(home_id: str, level: float):
             new_state=str(level),
         )
 
+        # Check if light is being turned on while in away mode
+        if level > 0.0 and old_level_float == 0.0:
+            home_mode = get_home_mode(home_id)
+            if home_mode == "away" and user_id:
+                alert_message = (
+                    "Security Alert: Light turned on while home is in away mode!"
+                )
+                logger.warning(f"[{DEVICE_NAME}] {alert_message}")
+                insert_alert(
+                    home_id=home_id,
+                    user_id=user_id,
+                    device_id=DEVICE_ID,
+                    message=alert_message,
+                )
+
 
 def get_light_intensity() -> float:
     """Get the current light intensity."""
@@ -139,16 +150,16 @@ def get_light_intensity() -> float:
         return _led.value
 
 
-def turn_light_on(home_id: str):
+def turn_light_on(home_id: str, user_id: str = None):
     """Turn the light on (set to maximum intensity)."""
     logger.info(f"[{DEVICE_NAME}] Turning light on.")
-    set_light_intensity(home_id, 1.0)
+    set_light_intensity(home_id, 1.0, user_id)
 
 
-def turn_light_off(home_id: str):
+def turn_light_off(home_id: str, user_id: str = None):
     """Turn the light off."""
     logger.info(f"[{DEVICE_NAME}] Turning light off.")
-    set_light_intensity(home_id, 0.0)
+    set_light_intensity(home_id, 0.0, user_id)
 
 
 def cleanup_light() -> None:

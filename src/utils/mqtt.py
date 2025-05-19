@@ -84,6 +84,13 @@ def _handle_light_control_message(payload: dict) -> None:
         home_id = payload["homeId"]
         state = payload["state"].lower()
 
+        # Get user_id for security alerts
+        user_id = get_user_id_for_home(home_id)
+        if not user_id:
+            logger.warning(
+                f"[MQTT] Could not fetch user_id for HOME_ID '{home_id}'. Alerts may not be sent."
+            )
+
         # Handle brightness control
         if "brightness" in payload:
             brightness = int(payload["brightness"])
@@ -97,7 +104,7 @@ def _handle_light_control_message(payload: dict) -> None:
                 logger.info(
                     f"[MQTT] Setting light brightness to {brightness}% (Intensity: {intensity_map[brightness]})"
                 )
-                set_light_intensity(home_id, intensity_map[brightness])
+                set_light_intensity(home_id, intensity_map[brightness], user_id)
             else:
                 logger.error(
                     f"[MQTT] Invalid brightness value: {brightness}. Must be one of: {list(intensity_map.keys())}"
@@ -107,10 +114,10 @@ def _handle_light_control_message(payload: dict) -> None:
         # Handle on/off control
         if state == "on":
             logger.info("[MQTT] Turning light on")
-            turn_light_on(home_id)
+            turn_light_on(home_id, user_id)
         elif state == "off":
             logger.info("[MQTT] Turning light off")
-            turn_light_off(home_id)
+            turn_light_off(home_id, user_id)
         else:
             logger.error(f"[MQTT] Invalid light state: {state}. Must be 'on' or 'off'")
 
@@ -148,12 +155,19 @@ def _handle_device_control_message(payload: dict) -> None:
         state = payload["state"]
         brightness = payload.get("brightness")
 
+        # Get user_id for security alerts
+        user_id = get_user_id_for_home(home_id)
+        if not user_id:
+            logger.warning(
+                f"[MQTT] Could not fetch user_id for HOME_ID '{home_id}'. Alerts may not be sent."
+            )
+
         # Only handle light device for now
         if device_id == "light_01":
             if state == "on":
-                turn_light_on(home_id, brightness)
+                turn_light_on(home_id, user_id)
             elif state == "off":
-                turn_light_off(home_id)
+                turn_light_off(home_id, user_id)
 
     except Exception as e:
         logger.error(f"[MQTT] Error handling device control message: {e}")
@@ -172,6 +186,7 @@ def _handle_automation_control_message(payload: dict) -> None:
     }
     """
     from src.sensors.light import turn_light_off
+    from src.utils.database import get_user_id_for_home
 
     try:
         # Validate required fields
@@ -187,6 +202,13 @@ def _handle_automation_control_message(payload: dict) -> None:
         mode_id = payload["mode_id"]
         is_active = payload["active"]
 
+        # Get user_id for security alerts
+        user_id = get_user_id_for_home(home_id)
+        if not user_id:
+            logger.warning(
+                f"[MQTT] Could not fetch user_id for HOME_ID '{home_id}'. Alerts may not be sent."
+            )
+
         # Only handle movie mode for now
         if mode_id == "movie":
             logger.info(
@@ -194,7 +216,7 @@ def _handle_automation_control_message(payload: dict) -> None:
             )
             if is_active:
                 # When movie mode is activated, turn off the light
-                turn_light_off(home_id)
+                turn_light_off(home_id, user_id)
                 logger.info("[MQTT] Turned off lights for movie mode")
 
     except Exception as e:

@@ -2,7 +2,7 @@ import threading
 import time
 from typing import Optional
 
-from PiicoDev_VEML6030 import PiicoDev_VEML6030  # Digital ambient light sensor
+from PiicoDev_VEML6030 import PiicoDev_VEML6030
 
 from src.utils.database import (
     get_device_by_id,
@@ -31,9 +31,9 @@ def categorize_lux(lux_value: float) -> str:
     - Light Open: 20-500 lux (indoor lighting)
     - Day: > 500 lux (bright daylight)
     """
-    if lux_value < 20:  # Darker threshold for night
+    if lux_value < 20:
         return "Night"
-    elif lux_value < 500:  # Wider range for normal indoor lighting
+    elif lux_value < 500:
         return "Light Open"
     else:
         return "Day"
@@ -49,7 +49,6 @@ def _read_lux_value() -> float:
         raise RuntimeError("Sensor not initialized")
 
     try:
-        # Read lux value directly from sensor
         lux = _sensor_instance.read()
         return lux
     except Exception as e:
@@ -84,10 +83,8 @@ def _lux_monitoring_loop(home_id: str) -> None:
                 continue
 
         try:
-            # Read current lux value
             lux = _read_lux_value()
 
-            # Only log if value has changed significantly (>5% change)
             if last_lux_value is None or abs(lux - last_lux_value) > (
                 last_lux_value * 0.05
             ):
@@ -160,11 +157,9 @@ def start_lux_monitoring(home_id: str) -> bool:
     logger.info(f"{log_prefix} Attempting to start monitoring for HOME_ID: {home_id}")
 
     try:
-        # Initialize sensor
         _sensor_instance = PiicoDev_VEML6030()
         logger.info(f"{log_prefix} VEML6030 sensor initialized")
 
-        # Test initial reading
         try:
             initial_lux = _read_lux_value()
             logger.info(f"{log_prefix} Initial lux reading: {initial_lux:.1f}")
@@ -223,7 +218,6 @@ def stop_lux_monitoring() -> None:
         if _monitoring_thread.is_alive():
             logger.error(f"{log_prefix} Monitoring thread did not join in time.")
 
-    # Cleanup sensor resources
     _sensor_instance = None
 
     logger.info(f"{log_prefix} Lux monitoring stopped and resources released.")

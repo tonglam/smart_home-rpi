@@ -2,9 +2,7 @@ import threading
 import time
 from typing import Optional
 
-from gpiozero import (
-    InputDevice,  # Changed from Button to InputDevice for simpler detection
-)
+from gpiozero import InputDevice
 
 from src.utils.database import (
     get_device_by_id,
@@ -26,8 +24,8 @@ _monitoring_thread: Optional[threading.Thread] = None
 _is_monitoring = threading.Event()
 _last_detection_time = 0
 _last_health_check_time = 0
-DETECTION_COOLDOWN = 30.0  # 30 second cooldown between detections (changed from 10s)
-HEALTH_CHECK_INTERVAL = 5.0  # Check sensor health every 5 seconds
+DETECTION_COOLDOWN = 60.0  # 30 second cooldown between detections (changed from 10s)
+HEALTH_CHECK_INTERVAL = 30.0  # Check sensor health every 5 seconds
 
 
 def _handle_disconnection():
@@ -35,7 +33,6 @@ def _handle_disconnection():
     logger.error(f"[{DEVICE_NAME}] Sensor appears to be disconnected")
     update_device_state(DEVICE_ID, "disconnected")
 
-    # Log the disconnection event
     device = get_device_by_id(DEVICE_ID)
     if device:
         old_state = device.get("current_state", "unknown")
@@ -163,13 +160,8 @@ def start_sound_monitoring(home_id: str, user_id: str) -> None:
     )
 
     try:
-        # Initialize with pull-down resistor for active-high sensor
-        _sound_sensor = InputDevice(
-            GPIO_PIN_SOUND,
-            pull_up=False,  # Using pull-down mode for active-high sensor
-        )
+        _sound_sensor = InputDevice(GPIO_PIN_SOUND, pull_up=False)
 
-        # Test if sensor is responding
         if _check_sensor_health():
             initial_state = "active" if _sound_sensor.value else "inactive"
             logger.info(
@@ -179,7 +171,6 @@ def start_sound_monitoring(home_id: str, user_id: str) -> None:
             logger.error(f"[{DEVICE_NAME}] Failed initial sensor health check")
             raise RuntimeError("Sensor health check failed during initialization")
 
-        # Register device if not present
         device = get_device_by_id(DEVICE_ID)
         if not device:
             logger.info(f"[{DEVICE_NAME}] Device not found in DB. Registering...")
@@ -191,11 +182,9 @@ def start_sound_monitoring(home_id: str, user_id: str) -> None:
                 current_state="idle",
             )
 
-        # Reset timers
-        _last_detection_time = 0  # Allow immediate first detection
+        _last_detection_time = 0
         _last_health_check_time = time.time()
 
-        # Start monitoring thread
         _is_monitoring.set()
         _monitoring_thread = threading.Thread(target=_sound_monitoring_loop)
         _monitoring_thread.daemon = True

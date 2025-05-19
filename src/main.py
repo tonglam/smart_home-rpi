@@ -4,7 +4,7 @@ import sys
 
 from dotenv import load_dotenv
 
-from src.sensors import camera, light, lux, motion, reed, sound
+from src.sensors import camera, light, lux, reed, sound
 from utils.database import get_user_id_for_home
 from utils.logger import logger
 from utils.mqtt import _mqtt_client_instance, get_mqtt_client
@@ -50,9 +50,6 @@ if __name__ == "__main__":
         logger.info("Initializing Lux Sensor Monitoring...")
         lux.start_lux_monitoring(home_id=app_home_id)
 
-        logger.info("Initializing Motion Sensor Monitoring...")
-        motion.start_motion_monitoring(home_id=app_home_id)
-
         logger.info("Initializing Light Control...")
         light.initialize_light(home_id=app_home_id, user_id=app_user_id)
 
@@ -72,7 +69,6 @@ if __name__ == "__main__":
         sound.stop_sound_monitoring()
         camera.stop_camera_streaming(app_home_id)
         lux.stop_lux_monitoring()
-        motion.stop_motion_monitoring()
         light.cleanup_light()
 
         if _mqtt_client_instance and _mqtt_client_instance.is_connected():

@@ -84,7 +84,7 @@ def _setup_mqtt() -> bool:
             )
             return False
 
-        for attempt in range(3):  # Try for a few seconds
+        for attempt in range(3):
             if mqtt_client.is_connected():
                 logger.info(
                     f"[{DEVICE_NAME}] MQTT client connected successfully in _setup_mqtt."
@@ -93,9 +93,8 @@ def _setup_mqtt() -> bool:
             logger.info(
                 f"[{DEVICE_NAME}] MQTT client not connected on attempt {attempt + 1}, waiting..."
             )
-            time.sleep(1)  # Wait 1 second
+            time.sleep(1)
 
-        # If still not connected after retries
         logger.error(f"[{DEVICE_NAME}] MQTT client is not connected after retries.")
         return False
 
@@ -150,7 +149,6 @@ def _upload_recording_to_r2() -> bool:
         return False
 
     try:
-        # Generate timestamped filename for R2 upload
         r2_path = f"recording.h264"
 
         if upload_file_to_r2(VIDEO_FILE_PATH, r2_path):
@@ -207,10 +205,8 @@ def _handle_recording(
         _picamera_object.stop_recording()
         logger.info(f"[{DEVICE_NAME}] Current recording stopped.")
 
-        # Upload current recording to R2
         _upload_recording_to_r2()
 
-        # Start new recording segment
         logger.info(f"[{DEVICE_NAME}] Starting new recording segment...")
         _picamera_object.start_recording(H264Encoder(), VIDEO_FILE_PATH)
         logger.info(f"[{DEVICE_NAME}] New recording segment started.")
@@ -230,8 +226,7 @@ def _camera_loop(home_id: str) -> None:
             f"[{DEVICE_NAME}] _camera_loop function entered for HOME_ID: {home_id}."
         )
     except Exception as e_log_init:
-        # Fallback print if logger itself has issues in thread context initially
-        print(
+        logger.error(
             f"PRINT_DEBUG: [{DEVICE_ID}] _camera_loop entered, logger exception: {e_log_init}"
         )
 
@@ -253,7 +248,6 @@ def _camera_loop(home_id: str) -> None:
         while _is_running.is_set():
             loop_iteration += 1
 
-            # Capture and process frame
             if _picamera_object:
                 try:
                     frame = _picamera_object.capture_array()
@@ -269,14 +263,11 @@ def _camera_loop(home_id: str) -> None:
                     continue
 
             else:
-                # Keeping this specific print as it indicates a potentially problematic state
-                # where the camera object is None within the main loop.
-                print(
+                logger.error(
                     f"PRINT_DEBUG: [{DEVICE_NAME}] _picamera_object is None in loop iteration {loop_iteration}. Skipping capture."
                 )
                 time.sleep(1)
 
-            # Handle video recording
             current_time = time.time()
             try:
                 recording_start_time, is_recording = _handle_recording(
@@ -329,18 +320,16 @@ def start_camera_streaming(home_id: str) -> None:
         f"[{DEVICE_NAME}] Attempting to start streaming and recording for HOME_ID: {home_id}..."
     )
 
-    # First check if camera is already running
-    device = get_device_by_id(DEVICE_ID)  # Initial fetch of device state
+    device = get_device_by_id(DEVICE_ID)
     if device and device.get("current_state") == "online":
         logger.warning(
             f"[{DEVICE_NAME}] Camera is already marked as online in database. Will attempt to restart by cleaning up."
         )
-        # Force cleanup of any existing resources
         _cleanup_camera()
         logger.info(
             f"[{DEVICE_NAME}] _cleanup_camera called after finding device online."
         )
-        device = None  # Reset device variable so it's re-evaluated later if needed
+        device = None
 
     if not _setup_camera():
         logger.error(f"[{DEVICE_NAME}] Failed to setup camera hardware.")
@@ -365,7 +354,6 @@ def start_camera_streaming(home_id: str) -> None:
         f"[{DEVICE_NAME}] Entering main try block for device registration and thread start..."
     )
     try:
-        # Get or register device. Re-fetch device status here to be certain after potential cleanup.
         current_device_in_db = get_device_by_id(DEVICE_ID)
         logger.info(
             f"[{DEVICE_NAME}] Fetched current_device_in_db: {current_device_in_db is not None}"
@@ -378,7 +366,7 @@ def start_camera_streaming(home_id: str) -> None:
                 home_id=home_id,
                 name=DEVICE_NAME,
                 type=DEVICE_TYPE,
-                current_state="initializing",  # Set to initializing, will be updated by _update_camera_state
+                current_state="initializing",
             )
             if not inserted_device:
                 logger.error(
@@ -393,20 +381,15 @@ def start_camera_streaming(home_id: str) -> None:
         else:
             logger.info(f"[{DEVICE_NAME}] Device already exists in DB.")
 
-        # Update state to online and log the event
         logger.info(f"[{DEVICE_NAME}] Calling _update_camera_state to set 'online'...")
         _update_camera_state(home_id, "online", "Camera streaming started")
 
-        # Start camera thread
         logger.info(f"[{DEVICE_NAME}] Setting _is_running event.")
         _is_running.set()
         _camera_thread = threading.Thread(target=_camera_loop, args=(home_id,))
-        _camera_thread.daemon = (
-            True  # Make thread daemon so it exits when main program exits
-        )
+        _camera_thread.daemon = True
         logger.info(f"[{DEVICE_NAME}] Attempting to start _camera_thread...")
         _camera_thread.start()
-        # Check if thread is alive immediately after starting
         if _camera_thread.is_alive():
             logger.info(
                 f"[{DEVICE_NAME}] _camera_thread.start() called and thread is alive."
@@ -435,14 +418,11 @@ def _update_camera_state(home_id: str, new_state: str, message: str) -> None:
         message: Message describing the state change
     """
     try:
-        # Get current state for event logging
         device = get_device_by_id(DEVICE_ID)
         old_state = device.get("current_state") if device else None
 
-        # Update device state
         update_device_state(DEVICE_ID, new_state)
 
-        # Log the event
         insert_event(
             home_id=home_id,
             device_id=DEVICE_ID,
@@ -486,7 +466,6 @@ def stop_camera_streaming(home_id: str) -> None:
             _picamera_object = None
             logger.info(f"[{DEVICE_NAME}] Camera stopped and closed.")
 
-            # Update state to offline
             _update_camera_state(home_id, "offline", "Camera streaming stopped")
 
         except Exception as e:
