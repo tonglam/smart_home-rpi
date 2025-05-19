@@ -57,7 +57,7 @@ def _handle_light_control_message(payload: dict) -> None:
         "type": "light",
         "deviceId": "light_e5f6g7h8",
         "state": "on",
-        "brightness": 0|25|50|100,
+        "brightness": 25|100,
         "createdAt": "2025-05-16T18:35:17.251Z"
     }
     """
@@ -91,8 +91,6 @@ def _handle_light_control_message(payload: dict) -> None:
             intensity_map = {
                 0: 0.0,  # Off
                 25: 0.1,  # Low
-                50: 0.3,  # Medium
-                75: 0.75,  # Medium-High
                 100: 1.0,  # Full
             }
             if brightness in intensity_map:
@@ -203,6 +201,56 @@ def _handle_automation_control_message(payload: dict) -> None:
         logger.error(f"[MQTT] Error handling automation control message: {e}")
 
 
+def _handle_camera_control_message(payload: dict) -> None:
+    """Handle camera control messages from MQTT.
+
+    Expected payload format:
+    {
+        "homeId": "00:1A:2B:3C:4D:5E",
+        "type": "camera",
+        "deviceId": "camera_01",
+        "state": "online" | "offline",
+        "createdAt": "2025-05-19T16:48:47.667Z"
+    }
+    """
+    from src.sensors.camera import start_camera_streaming, stop_camera_streaming
+
+    try:
+        logger.info(f"[MQTT] Received camera control payload: {payload}")
+
+        # Validate required fields
+        required_fields = ["homeId", "type", "deviceId", "state"]
+        if not all(field in payload for field in required_fields):
+            logger.error(
+                f"[MQTT] Missing required fields in camera control payload: {payload}"
+            )
+            return
+
+        # Only process camera type messages for the specific camera_01
+        if payload["type"] != "camera" or payload["deviceId"] != "camera_01":
+            logger.warning(
+                f"[MQTT] Received non-camera type or wrong deviceId in camera control handler: {payload}"
+            )
+            return
+
+        home_id = payload["homeId"]
+        state = payload["state"].lower()
+
+        if state == "online":
+            logger.info(f"[MQTT] Starting camera streaming for home_id: {home_id}")
+            start_camera_streaming(home_id)
+        elif state == "offline":
+            logger.info(f"[MQTT] Stopping camera streaming for home_id: {home_id}")
+            stop_camera_streaming(home_id)
+        else:
+            logger.error(
+                f"[MQTT] Invalid camera state: {state}. Must be 'online' or 'offline'"
+            )
+
+    except Exception as e:
+        logger.error(f"[MQTT] Error handling camera control message: {e}")
+
+
 def on_message(client: mqtt.Client, userdata: any, msg: mqtt.MQTTMessage) -> None:
     """Callback for when a PUBLISH message is received from the server."""
     logger.info(f"Received raw message on topic {msg.topic}: {msg.payload[:200]}...")
@@ -225,6 +273,8 @@ def on_message(client: mqtt.Client, userdata: any, msg: mqtt.MQTTMessage) -> Non
                 _handle_device_control_message(parsed_payload)
             elif message_type == "automation":
                 _handle_automation_control_message(parsed_payload)
+            elif message_type == "camera":
+                _handle_camera_control_message(parsed_payload)
             else:
                 logger.warning(
                     f"Received message on 'control' topic with unknown type: '{message_type}'. Payload: {parsed_payload}"
