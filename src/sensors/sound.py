@@ -2,7 +2,9 @@ import threading
 import time
 from typing import Optional
 
-from gpiozero import Button  # Changed from InputDevice to Button for edge detection
+from gpiozero import (
+    InputDevice,  # Changed from Button to InputDevice for simpler detection
+)
 
 from src.utils.database import (
     get_device_by_id,
@@ -19,12 +21,12 @@ DEVICE_TYPE = "sound_sensor"
 GPIO_PIN_SOUND = 20
 
 # Global state
-_sound_sensor: Optional[Button] = None
+_sound_sensor: Optional[InputDevice] = None
 _monitoring_thread: Optional[threading.Thread] = None
 _is_monitoring = threading.Event()
 _last_detection_time = 0
 _last_health_check_time = 0
-DETECTION_COOLDOWN = 10.0  # 10 second cooldown between detections
+DETECTION_COOLDOWN = 30.0  # 30 second cooldown between detections (changed from 10s)
 HEALTH_CHECK_INTERVAL = 5.0  # Check sensor health every 5 seconds
 
 
@@ -46,8 +48,30 @@ def _handle_disconnection():
         )
 
 
-def _on_sound_detected():
-    """Callback function for sound detection."""
+def _check_sensor_health() -> bool:
+    """Check if the sensor is still connected and functioning.
+
+    Returns:
+        bool: True if sensor is healthy, False otherwise
+    """
+    try:
+        if not _sound_sensor:
+            return False
+
+        # Try to read pin state
+        pin_state = _sound_sensor.value
+        if pin_state is None:
+            return False
+
+        return True
+
+    except Exception as e:
+        logger.error(f"[{DEVICE_NAME}] Error checking sensor health: {e}")
+        return False
+
+
+def _process_sound_detection():
+    """Process sound detection with cooldown period."""
     global _last_detection_time
     current_time = time.time()
 
@@ -56,16 +80,16 @@ def _on_sound_detected():
         logger.debug(
             f"[{DEVICE_NAME}] Skipping detection due to cooldown ({DETECTION_COOLDOWN}s)"
         )
-        return
+        return False
 
     _last_detection_time = current_time
     logger.info(f"[{DEVICE_NAME}] Sound event detected (Pin {GPIO_PIN_SOUND} active).")
 
     try:
         # Verify sensor is still connected
-        if _sound_sensor and _sound_sensor.pin.state is not None:
+        if _sound_sensor and _sound_sensor.value is not None:
             logger.debug(
-                f"[{DEVICE_NAME}] Pin state during detection: {_sound_sensor.pin.state}"
+                f"[{DEVICE_NAME}] Pin state during detection: {_sound_sensor.value}"
             )
 
             # Update device state
@@ -83,52 +107,14 @@ def _on_sound_detected():
                     old_state=old_state,
                     new_state="detected",
                 )
+            return True
         else:
             _handle_disconnection()
+            return False
 
     except Exception as e:
         logger.error(f"[{DEVICE_NAME}] Error during sound detection: {e}")
         _handle_disconnection()
-
-
-def _on_sound_ended():
-    """Callback function for when sound detection ends."""
-    try:
-        if _sound_sensor and _sound_sensor.pin.state is not None:
-            logger.info(
-                f"[{DEVICE_NAME}] Sound event ended (Pin {GPIO_PIN_SOUND} inactive)."
-            )
-            logger.debug(
-                f"[{DEVICE_NAME}] Pin state after sound ended: {_sound_sensor.pin.state}"
-            )
-            update_device_state(DEVICE_ID, "idle")
-        else:
-            _handle_disconnection()
-
-    except Exception as e:
-        logger.error(f"[{DEVICE_NAME}] Error during sound end detection: {e}")
-        _handle_disconnection()
-
-
-def _check_sensor_health() -> bool:
-    """Check if the sensor is still connected and functioning.
-
-    Returns:
-        bool: True if sensor is healthy, False otherwise
-    """
-    try:
-        if not _sound_sensor:
-            return False
-
-        # Try to read pin state
-        pin_state = _sound_sensor.pin.state
-        if pin_state is None:
-            return False
-
-        return True
-
-    except Exception as e:
-        logger.error(f"[{DEVICE_NAME}] Error checking sensor health: {e}")
         return False
 
 
@@ -150,6 +136,10 @@ def _sound_monitoring_loop():
                     _handle_disconnection()
                     time.sleep(1)  # Wait before retrying
                     continue
+
+            # Check if sound is detected
+            if _sound_sensor and _sound_sensor.value:
+                _process_sound_detection()
 
             time.sleep(0.1)  # Quick sleep for responsive monitoring
 
@@ -174,22 +164,16 @@ def start_sound_monitoring(home_id: str, user_id: str) -> None:
 
     try:
         # Initialize with pull-down resistor for active-high sensor
-        _sound_sensor = Button(
+        _sound_sensor = InputDevice(
             GPIO_PIN_SOUND,
             pull_up=False,  # Using pull-down mode for active-high sensor
-            bounce_time=0.05,  # Quick debounce time
         )
-
-        # Set up callbacks for edge detection
-        _sound_sensor.when_pressed = _on_sound_detected
-        _sound_sensor.when_released = _on_sound_ended
 
         # Test if sensor is responding
         if _check_sensor_health():
-            initial_state = "active" if _sound_sensor.is_pressed else "inactive"
-            pin_state = _sound_sensor.pin.state
+            initial_state = "active" if _sound_sensor.value else "inactive"
             logger.info(
-                f"[{DEVICE_NAME}] Initial sensor state on pin {GPIO_PIN_SOUND}: {initial_state} (pin state: {pin_state})"
+                f"[{DEVICE_NAME}] Initial sensor state on pin {GPIO_PIN_SOUND}: {initial_state}"
             )
         else:
             logger.error(f"[{DEVICE_NAME}] Failed initial sensor health check")

@@ -1,6 +1,4 @@
 import os
-import platform
-import sys
 import threading
 import time
 from enum import Enum
@@ -27,34 +25,18 @@ DEVICE_NAME = "Room Motion Sensor"
 DEVICE_TYPE = "motion_sensor"
 
 
-# --- Serial port configuration based on platform ---
+# --- Serial port configuration for Linux ---
 def get_default_serial_port() -> str:
-    """Returns the default serial port based on the operating system."""
-    system = platform.system().lower()
-
-    if system == "linux":
-        # Raspberry Pi hardware serial port
-        if os.path.exists("/dev/ttyS0"):
-            return "/dev/ttyS0"
-        # USB-to-Serial adapters usually appear as ttyUSB0
-        elif os.path.exists("/dev/ttyUSB0"):
-            return "/dev/ttyUSB0"
-    elif system == "darwin":  # macOS
-        # Look for USB-to-Serial adapters
-        ports = list(list_ports.comports())
-        for port in ports:
-            # Common USB-to-Serial adapter manufacturers
-            if any(
-                x in port.manufacturer.lower() if port.manufacturer else False
-                for x in ["silicon", "prolific", "ftdi"]
-            ):
-                return port.device
-        # If no USB-to-Serial adapter found, return a common macOS serial port
-        return "/dev/cu.usbserial"
-    elif system == "windows":
-        # Default to COM1 on Windows
-        return "COM1"
-
+    """Returns the default serial port for Linux systems."""
+    # Raspberry Pi hardware serial port
+    if os.path.exists("/dev/ttyS0"):
+        return "/dev/ttyS0"
+    # USB-to-Serial adapters usually appear as ttyUSB0
+    elif os.path.exists("/dev/ttyUSB0"):
+        return "/dev/ttyUSB0"
+    # If neither exists, fall back to ttyAMA0 which is sometimes used on newer Pis
+    elif os.path.exists("/dev/ttyAMA0"):
+        return "/dev/ttyAMA0"
     # Default fallback
     return "/dev/ttyUSB0"
 
