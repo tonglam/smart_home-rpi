@@ -137,6 +137,12 @@ def _motion_monitoring_loop(home_id: str) -> None:
                 current_status_enum = parse_mmwave_state(state_byte)
                 current_status_str = current_status_enum.value
 
+                # Log every reading, including the raw data and parsed state
+                logger.info(
+                    f"{log_prefix} Read motion data: Raw=[{','.join(hex(b) for b in data)}], "
+                    f"State byte={hex(state_byte)}, Parsed state='{current_status_str}'"
+                )
+
                 if current_status_enum == PresenceState.UNKNOWN:
                     time.sleep(1)
                     continue
@@ -202,6 +208,13 @@ def _motion_monitoring_loop(home_id: str) -> None:
                 else:
                     if first_reading_after_start:
                         first_reading_after_start = False
+            else:
+                # Log when we receive invalid data
+                if data:
+                    logger.debug(
+                        f"{log_prefix} Invalid data format received: Raw=[{','.join(hex(b) for b in data)}], "
+                        f"Length={len(data)}"
+                    )
 
         except serial.SerialException as e_loop_serial:
             logger.error(
