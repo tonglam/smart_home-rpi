@@ -136,7 +136,6 @@ def set_light_intensity(home_id: str, level: float):
             event_type="light_intensity_changed",
             old_state=str(old_level_float),
             new_state=str(level),
-            event_data={"brightness": brightness_int},
         )
 
 
