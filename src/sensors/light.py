@@ -17,7 +17,7 @@ DEVICE_TYPE = "led_light"
 LED_PIN = 16  # GPIO pin for LED
 
 # Allowed intensity levels
-levels = [0.0, 0.3, 0.5, 1.0]
+levels = [0.0, 0.2, 0.4, 1.0]
 
 # Global state for LED instance
 _led: Optional[PWMLED] = None
