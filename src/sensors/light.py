@@ -100,14 +100,6 @@ def initialize_light(home_id: str, user_id: str) -> None:
 
 def set_light_intensity(home_id: str, level: float):
     """Set the light intensity to a specific level."""
-    if level not in levels:
-        logger.error(
-            f"[{DEVICE_NAME}] Invalid light intensity level: {level}. Must be one of: {levels}"
-        )
-        raise ValueError(
-            f"Invalid light intensity level: {level}. Must be one of: {levels}"
-        )
-
     with _led_lock:
         if _led is None:
             logger.error(
