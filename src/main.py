@@ -4,12 +4,11 @@ import sys
 
 from dotenv import load_dotenv
 
-from src.sensors import light, lux, motion, reed, sound
+from src.sensors import camera, light, lux, motion, reed, sound
 from utils.database import get_user_id_for_home
 from utils.logger import logger
 from utils.mqtt import _mqtt_client_instance, get_mqtt_client
 
-# Determine the path to the .env file (project root)
 dotenv_path = os.path.join(os.path.dirname(__file__), "..", ".env")
 loaded_dotenv = load_dotenv(dotenv_path=dotenv_path)
 
@@ -45,8 +44,8 @@ if __name__ == "__main__":
         logger.info("Initializing Sound Sensor Monitoring...")
         sound.start_sound_monitoring(home_id=app_home_id, user_id=app_user_id)
 
-        # logger.info("Initializing Camera Streaming...")
-        # camera.start_camera_streaming(home_id=app_home_id)
+        logger.info("Initializing Camera Streaming...")
+        camera.start_camera_streaming(home_id=app_home_id)
 
         logger.info("Initializing Lux Sensor Monitoring...")
         lux.start_lux_monitoring(home_id=app_home_id)
@@ -71,7 +70,7 @@ if __name__ == "__main__":
         logger.info("[Main] Cleaning up resources...")
         reed.stop_reed_monitoring()
         sound.stop_sound_monitoring()
-        # camera.stop_camera_streaming(app_home_id)
+        camera.stop_camera_streaming(app_home_id)
         lux.stop_lux_monitoring()
         motion.stop_motion_monitoring()
         light.cleanup_light()
