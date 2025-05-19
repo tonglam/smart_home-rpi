@@ -2,7 +2,7 @@ import threading
 import time
 from typing import Optional
 
-from gpiozero import InputDevice
+import RPi.GPIO as GPIO
 
 from src.utils.database import (
     get_device_by_id,
@@ -23,22 +23,21 @@ DEVICE_TYPE = "reed_switch"
 REED_PIN = 21
 
 # Global state
-_reed_device: Optional[InputDevice] = None
 _monitoring_thread: Optional[threading.Thread] = None
 _is_monitoring = threading.Event()
 _last_state: Optional[str] = None
 _last_event_time: float = 0.0
 EVENT_COOLDOWN = 1.0  # Seconds
+_gpio_initialized_by_this_module = False
 
 
 def _on_door_opened_logic(
-    home_id: str, user_id: str, old_state_from_loop: Optional[str]
+    home_id: str, user_id: Optional[str], old_state_from_loop: Optional[str]
 ):
     """Handles logic when the door transitions to an open state."""
     logger.info(f"[{DEVICE_NAME}] Door opened detected.")
     update_device_state(DEVICE_ID, "open")
 
-    # Use the state passed from the loop as the definitive old_state
     actual_old_state = (
         old_state_from_loop
         if old_state_from_loop is not None
@@ -71,7 +70,7 @@ def _on_door_opened_logic(
 
 
 def _on_door_closed_logic(
-    home_id: str, user_id: str, old_state_from_loop: Optional[str]
+    home_id: str, user_id: Optional[str], old_state_from_loop: Optional[str]
 ):
     """Handles logic when the door transitions to a closed state."""
     logger.info(f"[{DEVICE_NAME}] Door closed detected.")
@@ -92,19 +91,24 @@ def _on_door_closed_logic(
     )
 
 
-def _reed_monitoring_loop(home_id: str, user_id: Optional[str]):  # user_id can be None
-    """Monitors the reed switch state by polling the GPIO pin."""
+def _reed_monitoring_loop(home_id: str, user_id: Optional[str]):
+    """Monitors the reed switch state by polling the GPIO pin using RPi.GPIO."""
     global _last_state, _last_event_time
     logger.info(
         f"[{DEVICE_NAME}] Reed switch monitoring loop started for HOME_ID: {home_id}."
     )
 
     # Initialize _last_state based on current sensor reading or database
-    if _reed_device:
-        pin_is_low_init = not _reed_device.value  # active_low with pull_up=True
+    try:
+        pin_signal_init = GPIO.input(REED_PIN)
+        pin_is_low_init = pin_signal_init == GPIO.LOW
         _last_state = "closed" if pin_is_low_init else "open"
-        logger.info(f"[{DEVICE_NAME}] Initial polled state: {_last_state}")
-    else:  # Fallback if _reed_device is somehow not set, though start_reed_monitoring should ensure it
+        logger.info(f"[{DEVICE_NAME}] Initial polled state (RPi.GPIO): {_last_state}")
+    except Exception as e:
+        logger.error(
+            f"[{DEVICE_NAME}] Error reading initial pin state: {e}. Falling back to DB state.",
+            exc_info=True,
+        )
         _last_state = get_latest_device_state(home_id, DEVICE_ID) or "unknown"
         logger.warning(
             f"[{DEVICE_NAME}] Initial state from DB (fallback): {_last_state}"
@@ -112,13 +116,29 @@ def _reed_monitoring_loop(home_id: str, user_id: Optional[str]):  # user_id can 
 
     try:
         while _is_monitoring.is_set():
-            if _reed_device is None:
+            try:
+                pin_signal = GPIO.input(REED_PIN)
+                pin_is_low = pin_signal == GPIO.LOW
+            except RuntimeError as e:
+                # This can happen if GPIOs are not set up or cleaned up unexpectedly
                 logger.error(
-                    f"[{DEVICE_NAME}] Reed device not initialized. Stopping loop."
+                    f"[{DEVICE_NAME}] RuntimeError reading GPIO pin {REED_PIN}: {e}. Attempting to re-setup.",
+                    exc_info=True,
                 )
-                break
+                try:
+                    # Attempt to re-initialize GPIO settings for this pin
+                    GPIO.setmode(GPIO.BCM)  # Ensure mode is set
+                    GPIO.setup(REED_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+                    logger.info(f"[{DEVICE_NAME}] Re-initialized GPIO pin {REED_PIN}.")
+                    time.sleep(1)  # Wait a bit after re-setup
+                    continue  # Retry reading in the next loop iteration
+                except Exception as re_setup_e:
+                    logger.critical(
+                        f"[{DEVICE_NAME}] Failed to re-setup GPIO pin {REED_PIN}: {re_setup_e}. Stopping loop.",
+                        exc_info=True,
+                    )
+                    break  # Exit loop if re-setup fails
 
-            pin_is_low = not _reed_device.value
             current_door_state = "closed" if pin_is_low else "open"
 
             if current_door_state != _last_state:
@@ -129,7 +149,7 @@ def _reed_monitoring_loop(home_id: str, user_id: Optional[str]):  # user_id can 
                     )
                     if current_door_state == "open":
                         _on_door_opened_logic(home_id, user_id, _last_state)
-                    else:
+                    else:  # current_door_state == "closed"
                         _on_door_closed_logic(home_id, user_id, _last_state)
                     _last_event_time = current_time
                 else:
@@ -140,15 +160,15 @@ def _reed_monitoring_loop(home_id: str, user_id: Optional[str]):  # user_id can 
                 _last_state = current_door_state
             time.sleep(0.1)  # Polling interval
     except Exception as e:
-        logger.error(f"[{DEVICE_NAME}] Error in monitoring loop: {e}", exc_info=True)
+        logger.error(
+            f"[{DEVICE_NAME}] Unhandled error in monitoring loop: {e}", exc_info=True
+        )
     finally:
         logger.info(f"[{DEVICE_NAME}] Reed switch monitoring loop ended.")
 
 
-def start_reed_monitoring(
-    home_id: str, user_id: Optional[str]
-) -> None:  # user_id can be None
-    global _reed_device, _monitoring_thread, _is_monitoring, _last_state, _last_event_time
+def start_reed_monitoring(home_id: str, user_id: Optional[str]) -> None:
+    global _monitoring_thread, _is_monitoring, _last_state, _last_event_time, _gpio_initialized_by_this_module
 
     if _is_monitoring.is_set():
         logger.info(
@@ -162,21 +182,36 @@ def start_reed_monitoring(
     )
 
     try:
-        # pull_up=True means pin is HIGH when switch is open, LOW when closed.
-        _reed_device = InputDevice(REED_PIN, pull_up=True)
-        _last_event_time = 0  # Reset cooldown timer on start
+        # GPIO setup using RPi.GPIO
+        # Check if another part of the application might have already set the mode.
+        # This is a simple check; a more robust system might use a global GPIO manager.
+        current_gpio_mode = GPIO.getmode()
+        if current_gpio_mode is None:  # Mode not set
+            GPIO.setmode(GPIO.BCM)
+            logger.info(f"[{DEVICE_NAME}] RPi.GPIO mode set to BCM.")
+            _gpio_initialized_by_this_module = (
+                True  # Mark that this module set the mode
+            )
+        elif current_gpio_mode != GPIO.BCM:
+            logger.warning(
+                f"[{DEVICE_NAME}] RPi.GPIO mode was already set to {current_gpio_mode} (expected BCM). Proceeding with existing mode."
+            )
+            # If it was BOARD, our REED_PIN number might be wrong. This is a potential conflict.
+        else:
+            logger.info(f"[{DEVICE_NAME}] RPi.GPIO mode already BCM.")
 
-        # Determine initial state for registration
-        # pin_is_low_initial = not _reed_device.value
-        # initial_state_for_db = "closed" if pin_is_low_initial else "open"
-        # _last_state = initial_state_for_db # Set initial _last_state here
+        GPIO.setup(REED_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        logger.info(f"[{DEVICE_NAME}] GPIO pin {REED_PIN} setup as IN with PUD_UP.")
+
+        _last_event_time = 0  # Reset cooldown timer on start
 
         device = get_device_by_id(DEVICE_ID)
         if not device:
-            # Determine initial state for registration more carefully
-            pin_is_low_initial = not _reed_device.value  # Read current hardware state
-            initial_state_for_db = "closed" if pin_is_low_initial else "open"
-            _last_state = initial_state_for_db  # Set initial _last_state for the loop
+            pin_signal_initial = GPIO.input(REED_PIN)
+            initial_state_for_db = (
+                "closed" if pin_signal_initial == GPIO.LOW else "open"
+            )
+            _last_state = initial_state_for_db
 
             logger.info(
                 f"[{DEVICE_NAME}] Device not found in DB. Registering with initial state: {initial_state_for_db}..."
@@ -190,18 +225,15 @@ def start_reed_monitoring(
             )
             logger.info(f"[{DEVICE_NAME}] Device registered.")
         else:
-            # If device exists, set _last_state from DB or current hardware state
-            # to prevent an immediate false event if states differ.
             db_state = device.get("current_state")
-            hw_pin_is_low = not _reed_device.value
-            hw_state = "closed" if hw_pin_is_low else "open"
+            hw_pin_signal = GPIO.input(REED_PIN)
+            hw_state = "closed" if hw_pin_signal == GPIO.LOW else "open"
 
             if db_state and db_state in ["open", "closed"]:
                 _last_state = db_state
                 logger.info(
                     f"[{DEVICE_NAME}] Device exists. Initializing _last_state from DB: {db_state}"
                 )
-                # Optionally, sync DB if hardware is different (or assume loop will handle it)
                 if db_state != hw_state:
                     logger.warning(
                         f"[{DEVICE_NAME}] DB state ({db_state}) differs from HW state ({hw_state}). Loop will sync."
@@ -213,7 +245,6 @@ def start_reed_monitoring(
                 )
 
         _is_monitoring.set()
-        # Pass home_id and user_id to the loop
         _monitoring_thread = threading.Thread(
             target=_reed_monitoring_loop, args=(home_id, user_id)
         )
@@ -223,14 +254,13 @@ def start_reed_monitoring(
 
     except Exception as e:
         logger.error(f"[{DEVICE_NAME}] Error starting monitoring: {e}", exc_info=True)
-        if _reed_device:
-            _reed_device.close()
-            _reed_device = None
         _is_monitoring.clear()
+        # No specific _reed_device to close, but RPi.GPIO cleanup is tricky here.
+        # If this module set GPIO.setmode, it could clean up, but not if mode was pre-existing.
 
 
 def stop_reed_monitoring() -> None:
-    global _is_monitoring, _monitoring_thread, _reed_device
+    global _is_monitoring, _monitoring_thread, _last_state, _gpio_initialized_by_this_module
     logger.info(f"[{DEVICE_NAME}] Stopping monitoring...")
     _is_monitoring.clear()
 
@@ -241,15 +271,20 @@ def stop_reed_monitoring() -> None:
             logger.warning(f"[{DEVICE_NAME}] Monitoring thread did not finish in time.")
         _monitoring_thread = None
 
-    if _reed_device is not None:
-        try:
-            _reed_device.close()
-            logger.info(f"[{DEVICE_NAME}] Reed device closed.")
-        except Exception as e:
-            logger.error(
-                f"[{DEVICE_NAME}] Error closing reed device: {e}", exc_info=True
-            )
-        _reed_device = None
+    # RPi.GPIO cleanup is complex for a module.
+    # GPIO.cleanup() affects all channels. Calling it here might affect other modules.
+    # If this module exclusively set the mode via GPIO.setmode(), it could call GPIO.cleanup().
+    # For now, we are not calling GPIO.cleanup() here to avoid side effects.
+    # The pin remains setup as IN. OS will reclaim on process exit.
+    # if _gpio_initialized_by_this_module:
+    #     try:
+    #         GPIO.cleanup(REED_PIN) # Clean up only this channel if possible/desired
+    #         logger.info(f"[{DEVICE_NAME}] GPIO pin {REED_PIN} cleaned up.")
+    #     except Exception as e:
+    #         logger.error(f"[{DEVICE_NAME}] Error during GPIO cleanup for pin {REED_PIN}: {e}")
+    # _gpio_initialized_by_this_module = False
 
     _last_state = None  # Reset last_state
-    logger.info(f"[{DEVICE_NAME}] Monitoring stopped and resources cleaned up.")
+    logger.info(
+        f"[{DEVICE_NAME}] Monitoring stopped."
+    )  # Removed "and resources cleaned up" as GPIO isn't cleaned by this func
