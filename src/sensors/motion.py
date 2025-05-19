@@ -48,8 +48,10 @@ DEFAULT_BAUD_RATE = 115200  # May need to be adjusted based on actual sensor
 _serial_connection: Optional[serial.Serial] = None
 _monitoring_thread: Optional[threading.Thread] = None
 _is_monitoring = threading.Event()
-_consecutive_invalid_reads = 0
-MAX_INVALID_READS = 20  # After this many invalid reads, try changing baud rate
+_last_state_change_time = 0
+MOTION_COOLDOWN = 5.0  # Seconds between state changes to avoid excessive DB writes
+MOTION_THRESHOLD = 3  # Minimum number of non-zero bytes to consider potential motion
+READ_BUFFER_SIZE = 64  # Size of data to read from sensor
 
 
 # --- Enum for Presence States ---
@@ -60,109 +62,49 @@ class PresenceState(Enum):
     UNKNOWN = "unknown"
 
 
-def try_parse_mmwave_data(data: bytes) -> Tuple[bool, Optional[PresenceState]]:
+def parse_binary_data(data: bytes) -> Tuple[bool, PresenceState]:
     """
-    Try to parse data from mmWave sensor using multiple methods.
+    Parse binary data from the motion sensor.
+
+    Args:
+        data: Binary data from the sensor
 
     Returns:
-        Tuple of (success, presence_state)
+        (success, presence_state) tuple
     """
     log_prefix = f"[{DEVICE_ID} ({DEVICE_NAME})]"
 
-    # Log the raw data for debugging
+    # Log raw binary data at debug level
+    if logger.isEnabledFor(10):  # DEBUG level
+        logger.debug(
+            f"{log_prefix} Raw data: [{','.join(hex(b) for b in data)}], Length={len(data)}"
+        )
+
+    # Check for meaningful data
+    if not data or len(data) < 3:
+        return False, PresenceState.UNKNOWN
+
+    # Count significant bytes to determine motion
+    non_zero_bytes = sum(1 for b in data if b != 0)
+    special_bytes = sum(1 for b in data if b in (0xFE, 0xF0, 0xF8, 0xC0))
+
+    # Log the counters at debug level
     logger.debug(
-        f"{log_prefix} Raw data: [{','.join(hex(b) for b in data)}], "
-        f"Length={len(data)}"
+        f"{log_prefix} Non-zero bytes: {non_zero_bytes}, Special bytes: {special_bytes}"
     )
 
-    # Method 1: Check for expected header 0xA5, 0x5A (original method)
-    if len(data) >= 7 and data[0] == 0xA5 and data[1] == 0x5A:
-        state_byte = data[4]
-        return True, parse_mmwave_state(state_byte)
-
-    # Method 2: Look for any non-zero values that might indicate motion
-    # Count non-zero bytes as a heuristic for motion
-    non_zero_count = sum(1 for b in data if b != 0)
-    if non_zero_count > 3:  # If more than 3 bytes are non-zero, assume movement
-        logger.debug(
-            f"{log_prefix} Detected potential movement based on non-zero bytes: {non_zero_count}"
-        )
+    # If we have many non-zero bytes or special bytes, likely motion
+    if non_zero_bytes > MOTION_THRESHOLD + 3 or special_bytes > 2:
         return True, PresenceState.MOVING_PRESENCE
-    elif non_zero_count > 0:  # Some non-zero, but not enough for definite movement
-        logger.debug(
-            f"{log_prefix} Detected potential presence based on non-zero bytes: {non_zero_count}"
-        )
+    elif non_zero_bytes > MOTION_THRESHOLD:
         return True, PresenceState.STILL_PRESENCE
-    else:  # All zeros
-        return True, PresenceState.NO_PRESENCE
-
-    # If we get here, we couldn't parse the data
-    return False, None
-
-
-def parse_mmwave_state(state_byte: int) -> PresenceState:
-    """Parses the state byte from the mmWave sensor into a PresenceState enum member."""
-    if state_byte == 0x00:
-        return PresenceState.NO_PRESENCE
-    elif state_byte == 0x01:
-        return PresenceState.MOVING_PRESENCE
-    elif state_byte == 0x02:
-        return PresenceState.STILL_PRESENCE
     else:
-        logger.warning(
-            f"[{DEVICE_ID}] Unknown mmWave sensor state byte: {hex(state_byte)}"
-        )
-        return PresenceState.UNKNOWN
-
-
-def try_different_baud_rates() -> bool:
-    """Try different baud rates to see if we can get valid data.
-
-    Returns:
-        bool: True if successfully reconnected with a new baud rate
-    """
-    global _serial_connection, DEFAULT_BAUD_RATE
-    log_prefix = f"[{DEVICE_ID} ({DEVICE_NAME})]"
-
-    common_baud_rates = [9600, 19200, 38400, 57600, 115200]
-    # Move current baud rate to the end to try it last
-    if DEFAULT_BAUD_RATE in common_baud_rates:
-        common_baud_rates.remove(DEFAULT_BAUD_RATE)
-    common_baud_rates.append(DEFAULT_BAUD_RATE)
-
-    for baud_rate in common_baud_rates:
-        try:
-            if _serial_connection and _serial_connection.isOpen():
-                _serial_connection.close()
-
-            logger.info(f"{log_prefix} Trying baud rate: {baud_rate}")
-            _serial_connection = serial.Serial(
-                DEFAULT_SERIAL_PORT, baud_rate, timeout=1
-            )
-
-            # Wait for data
-            time.sleep(1)
-            if _serial_connection.in_waiting > 0:
-                data = _serial_connection.read(_serial_connection.in_waiting)
-                logger.info(
-                    f"{log_prefix} Received data with baud rate {baud_rate}: "
-                    f"[{','.join(hex(b) for b in data)}], Length={len(data)}"
-                )
-
-                # If we got data, update the default baud rate
-                DEFAULT_BAUD_RATE = baud_rate
-                logger.info(f"{log_prefix} Switched to baud rate: {baud_rate}")
-                return True
-        except Exception as e:
-            logger.error(f"{log_prefix} Error trying baud rate {baud_rate}: {e}")
-
-    logger.error(f"{log_prefix} Failed to find a working baud rate")
-    return False
+        return True, PresenceState.NO_PRESENCE
 
 
 def _motion_monitoring_loop(home_id: str) -> None:
     """Internal loop that reads sensor data, processes, and logs it."""
-    global _serial_connection, _consecutive_invalid_reads
+    global _serial_connection, _last_state_change_time
     log_prefix = f"[{DEVICE_ID} ({DEVICE_NAME})]"
 
     logger.info(
@@ -176,8 +118,8 @@ def _motion_monitoring_loop(home_id: str) -> None:
         )
 
     first_reading_after_start = True
+    last_known_status = None
     last_data_buffer = bytearray()
-    read_buffer_size = 64  # Collect more data to analyze patterns
 
     while _is_monitoring.is_set():
         if _serial_connection is None or not _serial_connection.isOpen():
@@ -205,7 +147,6 @@ def _motion_monitoring_loop(home_id: str) -> None:
                 logger.info(
                     f"{log_prefix} Successfully re-opened serial port {DEFAULT_SERIAL_PORT} at {DEFAULT_BAUD_RATE} baud."
                 )
-                _consecutive_invalid_reads = 0
             except serial.SerialException as e_serial:
                 logger.error(
                     f"{log_prefix} Failed to re-open serial port {DEFAULT_SERIAL_PORT}: {e_serial}. "
@@ -221,107 +162,116 @@ def _motion_monitoring_loop(home_id: str) -> None:
                 continue
 
         try:
-            # Read available data
+            # Read binary data if available
             if _serial_connection.in_waiting > 0:
+                # Read into buffer
                 data = _serial_connection.read(_serial_connection.in_waiting)
                 last_data_buffer.extend(data)
-                # Keep buffer size manageable
-                if len(last_data_buffer) > read_buffer_size:
-                    last_data_buffer = last_data_buffer[-read_buffer_size:]
 
-            # If we have enough data, try to parse it
-            if len(last_data_buffer) >= 7:
-                data_to_parse = bytes(last_data_buffer)
-                success, current_status_enum = try_parse_mmwave_data(data_to_parse)
+                # Keep buffer manageable
+                if len(last_data_buffer) > READ_BUFFER_SIZE:
+                    last_data_buffer = last_data_buffer[-READ_BUFFER_SIZE:]
 
-                if success:
-                    _consecutive_invalid_reads = 0
-                    current_status_str = current_status_enum.value
+                # Only process if we have enough data
+                if len(last_data_buffer) >= 7:
+                    # Parse the binary data
+                    data_to_parse = bytes(last_data_buffer)
+                    success, current_status_enum = parse_binary_data(data_to_parse)
 
-                    # Log the parsed data
-                    logger.info(f"{log_prefix} Motion state: '{current_status_str}'")
+                    if success:
+                        current_status_str = current_status_enum.value
+                        current_time = time.time()
 
-                    if current_status_enum == PresenceState.UNKNOWN:
-                        time.sleep(1)
-                        continue
+                        # Log state changes or periodic updates
+                        if (
+                            last_known_status != current_status_enum
+                            or current_time % 30 < 1
+                        ):
+                            logger.info(
+                                f"{log_prefix} Motion state: '{current_status_str}'"
+                            )
 
-                    old_state_str = get_latest_device_state(
-                        home_id=home_id, device_id=DEVICE_ID
-                    )
+                        if current_status_enum == PresenceState.UNKNOWN:
+                            continue
 
-                    # Check for motion presence and home mode
-                    if current_status_enum == PresenceState.MOVING_PRESENCE:
-                        home_mode = get_home_mode(home_id)
-                        if home_mode == "away":
-                            # Check sound sensor state
-                            sound_state = get_device_state("sound_sensor_01")
-                            if sound_state == "detected":
-                                # Both motion and sound detected while in away mode
-                                user_id = get_user_id_for_home(home_id)
-                                if user_id:
-                                    alert_message = "Security Alert: Motion and sound detected while home is in away mode. There might be someone in your home."
-                                    logger.warning(f"{log_prefix} {alert_message}")
-                                    insert_alert(
-                                        home_id=home_id,
-                                        user_id=user_id,
-                                        device_id=DEVICE_ID,
-                                        message=alert_message,
-                                    )
+                        # Apply cooldown to reduce excessive state changes
+                        should_update_state = (
+                            first_reading_after_start
+                            or last_known_status != current_status_enum
+                            or (current_time - _last_state_change_time)
+                            >= MOTION_COOLDOWN
+                        )
 
-                    if first_reading_after_start and old_state_str is None:
-                        logger.info(
-                            f"{log_prefix} First state detected after start: '{current_status_str}'. Previous state was not recorded or device is new. Logging event."
-                        )
-                        update_device_state(
-                            device_id=DEVICE_ID, new_state=current_status_str
-                        )
-                        insert_event(
-                            home_id=home_id,
-                            device_id=DEVICE_ID,
-                            event_type="presence",
-                            old_state=None,
-                            new_state=current_status_str,
-                        )
-                        first_reading_after_start = False
-                    elif old_state_str != current_status_str:
-                        log_message_old_state = (
-                            old_state_str
-                            if old_state_str is not None
-                            else "not previously recorded"
-                        )
-                        logger.info(
-                            f"{log_prefix} State changed from '{log_message_old_state}' to '{current_status_str}'. Logging event."
-                        )
-                        update_device_state(
-                            device_id=DEVICE_ID, new_state=current_status_str
-                        )
-                        insert_event(
-                            home_id=home_id,
-                            device_id=DEVICE_ID,
-                            event_type="presence",
-                            old_state=old_state_str,
-                            new_state=current_status_str,
-                        )
-                        first_reading_after_start = False
-                    else:
-                        if first_reading_after_start:
-                            first_reading_after_start = False
+                        if should_update_state:
+                            old_state_str = get_latest_device_state(
+                                home_id=home_id, device_id=DEVICE_ID
+                            )
 
-                    # Clear buffer after successful parse
-                    last_data_buffer.clear()
-                else:
-                    _consecutive_invalid_reads += 1
-                    if _consecutive_invalid_reads >= MAX_INVALID_READS:
-                        logger.warning(
-                            f"{log_prefix} Received {_consecutive_invalid_reads} consecutive invalid reads. "
-                            f"Trying different baud rates..."
-                        )
-                        if try_different_baud_rates():
-                            _consecutive_invalid_reads = 0
-                            last_data_buffer.clear()
-                        else:
-                            # If all baud rates failed, just reset counter and continue
-                            _consecutive_invalid_reads = 0
+                            # Check for motion presence and home mode
+                            if current_status_enum == PresenceState.MOVING_PRESENCE:
+                                home_mode = get_home_mode(home_id)
+                                if home_mode == "away":
+                                    # Check sound sensor state
+                                    sound_state = get_device_state("sound_sensor_01")
+                                    if sound_state == "detected":
+                                        # Both motion and sound detected while in away mode
+                                        user_id = get_user_id_for_home(home_id)
+                                        if user_id:
+                                            alert_message = "Security Alert: Motion and sound detected while home is in away mode. There might be someone in your home."
+                                            logger.warning(
+                                                f"{log_prefix} {alert_message}"
+                                            )
+                                            insert_alert(
+                                                home_id=home_id,
+                                                user_id=user_id,
+                                                device_id=DEVICE_ID,
+                                                message=alert_message,
+                                            )
+
+                            if first_reading_after_start and old_state_str is None:
+                                logger.info(
+                                    f"{log_prefix} First state detected after start: '{current_status_str}'. Previous state was not recorded or device is new. Logging event."
+                                )
+                                update_device_state(
+                                    device_id=DEVICE_ID, new_state=current_status_str
+                                )
+                                insert_event(
+                                    home_id=home_id,
+                                    device_id=DEVICE_ID,
+                                    event_type="presence",
+                                    old_state=None,
+                                    new_state=current_status_str,
+                                )
+                                first_reading_after_start = False
+                                _last_state_change_time = current_time
+                            elif old_state_str != current_status_str:
+                                log_message_old_state = (
+                                    old_state_str
+                                    if old_state_str is not None
+                                    else "not previously recorded"
+                                )
+                                logger.info(
+                                    f"{log_prefix} State changed from '{log_message_old_state}' to '{current_status_str}'. Logging event."
+                                )
+                                update_device_state(
+                                    device_id=DEVICE_ID, new_state=current_status_str
+                                )
+                                insert_event(
+                                    home_id=home_id,
+                                    device_id=DEVICE_ID,
+                                    event_type="presence",
+                                    old_state=old_state_str,
+                                    new_state=current_status_str,
+                                )
+                                first_reading_after_start = False
+                                _last_state_change_time = current_time
+                            else:
+                                if first_reading_after_start:
+                                    first_reading_after_start = False
+
+                        last_known_status = current_status_enum
+                        # Clear buffer after successful parse
+                        last_data_buffer.clear()
 
             # If no data, sleep briefly
             else:
@@ -342,14 +292,14 @@ def _motion_monitoring_loop(home_id: str) -> None:
             )
             time.sleep(5)
 
-        time.sleep(0.5)  # Reduced sleep time for more responsive readings
+        time.sleep(0.1)  # Reduced sleep time for more responsive readings
 
     logger.info(f"{log_prefix} Monitoring loop stopped.")
 
 
 def start_motion_monitoring(home_id: str) -> bool:
     """Initializes and starts the motion sensor monitoring."""
-    global _serial_connection, _monitoring_thread, _is_monitoring
+    global _serial_connection, _monitoring_thread, _is_monitoring, _last_state_change_time
     log_prefix = f"[{DEVICE_ID} ({DEVICE_NAME})]"
 
     if _is_monitoring.is_set():
@@ -387,6 +337,7 @@ def start_motion_monitoring(home_id: str) -> bool:
                 current_db_state = PresenceState.UNKNOWN.value
             update_device_state(device_id=DEVICE_ID, new_state=current_db_state)
 
+        _last_state_change_time = time.time()
         _is_monitoring.set()
         _monitoring_thread = threading.Thread(
             target=_motion_monitoring_loop,
