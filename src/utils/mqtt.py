@@ -87,15 +87,18 @@ def _handle_light_control_message(payload: dict) -> None:
         # Handle brightness control
         if "brightness" in payload:
             brightness = int(payload["brightness"])
-            # Map brightness levels to intensity values
+            # Map brightness percentages from MQTT to PWMLED intensity levels (0.0-1.0)
             intensity_map = {
                 0: 0.0,  # Off
-                25: 0.3,  # Low
-                50: 0.5,  # Medium
+                25: 0.25,  # Low
+                50: 0.50,  # Medium
+                75: 0.75,  # Medium-High
                 100: 1.0,  # Full
             }
             if brightness in intensity_map:
-                logger.info(f"[MQTT] Setting light brightness to {brightness}%")
+                logger.info(
+                    f"[MQTT] Setting light brightness to {brightness}% (Intensity: {intensity_map[brightness]})"
+                )
                 set_light_intensity(home_id, intensity_map[brightness])
             else:
                 logger.error(

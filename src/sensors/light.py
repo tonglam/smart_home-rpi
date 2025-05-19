@@ -16,8 +16,9 @@ DEVICE_NAME = "PWM LED Light"
 DEVICE_TYPE = "led_light"
 LED_PIN = 16  # GPIO pin for LED
 
-# Allowed intensity levels
-levels = [0.0, 0.2, 0.4, 1.0]
+# Allowed intensity levels (0.0 to 1.0 for PWMLED)
+# These correspond to 0%, 25%, 50%, 75%, 100%
+levels = [0.0, 0.1, 0.3, 0.75, 1.0]
 
 # Global state for LED instance
 _led: Optional[PWMLED] = None
