@@ -14,7 +14,7 @@ from src.utils.logger import logger
 DEVICE_ID = "light_01"
 DEVICE_NAME = "PWM LED Light"
 DEVICE_TYPE = "led_light"
-LED_PIN = 2  # GPIO pin for LED
+LED_PIN = 16  # GPIO pin for LED
 
 # Allowed intensity levels
 levels = [0.0, 0.3, 0.5, 1.0]
