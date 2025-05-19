@@ -6,6 +6,7 @@ from gpiozero import InputDevice
 
 from src.utils.database import (
     get_device_by_id,
+    get_home_mode,
     insert_device,
     insert_event,
     update_device_state,
@@ -95,15 +96,27 @@ def _process_sound_detection():
             # Get the current device to check previous state
             device = get_device_by_id(DEVICE_ID)
             if device:
+                home_id = device.get("home_id")
                 old_state = device.get("current_state", "idle")
-                # Log the event
-                insert_event(
-                    home_id=device.get("home_id"),
-                    device_id=DEVICE_ID,
-                    event_type="sound_detected",
-                    old_state=old_state,
-                    new_state="detected",
-                )
+
+                # Only log event when home is in away mode
+                home_mode = get_home_mode(home_id)
+                if home_mode == "away":
+                    # Log the event
+                    insert_event(
+                        home_id=home_id,
+                        device_id=DEVICE_ID,
+                        event_type="sound_detected",
+                        old_state=old_state,
+                        new_state="detected",
+                    )
+                    logger.info(
+                        f"[{DEVICE_NAME}] Sound event logged (home in away mode)"
+                    )
+                else:
+                    logger.debug(
+                        f"[{DEVICE_NAME}] Sound event detected but not logged (home mode: {home_mode})"
+                    )
             return True
         else:
             _handle_disconnection()
