@@ -247,7 +247,7 @@ def _handle_automation_control_message(payload: dict) -> None:
             )
             if is_active:
                 set_light_intensity(home_id, 0.2)
-                logger.info("[MQTT] Turned on lights for movie mode to watch a movie")
+                logger.info("[MQTT] Turned on lights for movie mode to 20%")
 
     except Exception as e:
         logger.error(f"[MQTT] Error handling automation control message: {e}")
