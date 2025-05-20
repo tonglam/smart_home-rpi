@@ -8,6 +8,7 @@ from src.utils.database import (
     get_device_by_id,
     get_home_mode,
     get_latest_device_state,
+    get_user_id_for_home,
     insert_alert,
     insert_device,
     insert_event,
@@ -56,17 +57,15 @@ def _on_door_opened_logic(
     if home_mode == "away":
         alert_message = "Security Alert: Door opened while home is in away mode!"
         logger.warning(f"[{DEVICE_NAME}] {alert_message}")
-        if user_id:
-            insert_alert(
-                home_id=home_id,
-                user_id=user_id,
-                device_id=DEVICE_ID,
-                message=alert_message,
-            )
-        else:
-            logger.error(
-                f"[{DEVICE_NAME}] Cannot send alert, user_id is None for home_id {home_id}"
-            )
+        if not user_id:
+            user_id = get_user_id_for_home(home_id)
+
+        insert_alert(
+            home_id=home_id,
+            user_id=user_id,
+            device_id=DEVICE_ID,
+            message=alert_message,
+        )
 
 
 def _on_door_closed_logic(home_id: str, old_state_from_loop: Optional[str]):

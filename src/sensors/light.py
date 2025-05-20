@@ -6,6 +6,7 @@ from gpiozero import PWMLED
 from src.utils.database import (
     get_device_by_id,
     get_home_mode,
+    get_user_id_for_home,
     insert_alert,
     insert_device,
     insert_event,
@@ -145,6 +146,9 @@ def set_light_intensity(home_id: str, level: float, user_id: Optional[str] = Non
 
             if level > 0.0 and old_level_float == 0.0:
                 home_mode = get_home_mode(home_id)
+
+                if not user_id:
+                    user_id = get_user_id_for_home(home_id)
                 if home_mode == "away" and user_id:
                     alert_message = (
                         "Security Alert: Light turned on while home is in away mode!"
