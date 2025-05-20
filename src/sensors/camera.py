@@ -53,6 +53,28 @@ def _setup_camera() -> bool:
     global _picamera_object
     try:
         logger.info(f"[{DEVICE_NAME}] Initializing camera...")
+
+        # First check if there are any existing camera processes
+        try:
+            # Use subprocess to check for other processes using the camera
+            ps_output = subprocess.run(
+                ["ps", "-ef", "|", "grep", "libcamera"],
+                capture_output=True,
+                text=True,
+                shell=True,
+            )
+            if "libcamera" in ps_output.stdout and "grep" not in ps_output.stdout:
+                logger.warning(
+                    f"[{DEVICE_NAME}] Other camera processes may be running: {ps_output.stdout}"
+                )
+        except Exception as e_ps:
+            logger.warning(
+                f"[{DEVICE_NAME}] Unable to check for other camera processes: {e_ps}"
+            )
+
+        # Add a delay before trying to initialize camera
+        time.sleep(2)
+
         _picamera_object = Picamera2()
 
         # Configure camera
@@ -60,14 +82,53 @@ def _setup_camera() -> bool:
             main={"size": (FRAME_WIDTH, FRAME_HEIGHT), "format": "RGB888"}
         )
         _picamera_object.configure(config)
+
+        # Add a delay after configure before starting
+        time.sleep(1)
+
         _picamera_object.start()
 
         logger.info(f"[{DEVICE_NAME}] Camera started successfully.")
         return True
+    except RuntimeError as e:
+        if "Failed to acquire camera: Device or resource busy" in str(e):
+            logger.error(
+                f"[{DEVICE_NAME}] Camera is already in use by another process. Try restarting the device or killing other camera processes."
+            )
+            # Try to identify the process using the camera
+            try:
+                subprocess.run(
+                    ["sudo", "fuser", "-v", "/dev/video0"],
+                    capture_output=True,
+                    text=True,
+                )
+            except Exception:
+                pass
+        elif "Permission denied" in str(e):
+            logger.error(
+                f"[{DEVICE_NAME}] Permission denied accessing camera. Ensure the user has video group permissions."
+            )
+            # Suggest a fix
+            logger.info(
+                f"[{DEVICE_NAME}] Try: sudo usermod -a -G video $USER && sudo reboot"
+            )
+        else:
+            logger.error(f"[{DEVICE_NAME}] Error setting up camera: {e}", exc_info=True)
+
+        if _picamera_object:
+            try:
+                _picamera_object.close()
+            except Exception:
+                pass
+            _picamera_object = None
+        return False
     except Exception as e:
         logger.error(f"[{DEVICE_NAME}] Error setting up camera: {e}", exc_info=True)
         if _picamera_object:
-            _picamera_object.close()
+            try:
+                _picamera_object.close()
+            except Exception:
+                pass
             _picamera_object = None
         return False
 
@@ -707,6 +768,50 @@ def stop_camera_streaming(home_id: str) -> None:
                 f"[{DEVICE_NAME}] Error during camera stop/close in stop_camera_streaming: {e_stop}",
                 exc_info=True,
             )
+            # Force release camera resources if normal close fails
+            try:
+                logger.info(
+                    f"[{DEVICE_NAME}] Attempting alternative method to force close camera..."
+                )
+                # Try more aggressively to release the camera
+                if hasattr(_picamera_object, "close"):
+                    # Try multiple times
+                    for i in range(3):
+                        try:
+                            _picamera_object.close()
+                            logger.info(
+                                f"[{DEVICE_NAME}] Forced camera close succeeded on attempt {i+1}"
+                            )
+                            camera_operations_successful = True
+                            break
+                        except Exception as e_retry:
+                            logger.warning(
+                                f"[{DEVICE_NAME}] Retry {i+1} to close camera failed: {e_retry}"
+                            )
+                            time.sleep(0.5)
+            except Exception as e_force:
+                logger.error(f"[{DEVICE_NAME}] Force close also failed: {e_force}")
+
+            # If all else fails, try to kill processes using the camera
+            if not camera_operations_successful:
+                try:
+                    logger.info(
+                        f"[{DEVICE_NAME}] Attempting to identify and release camera resources..."
+                    )
+                    # Check for processes using video devices
+                    subprocess.run(
+                        ["sudo", "fuser", "-k", "/dev/video0"],
+                        capture_output=True,
+                        text=True,
+                    )
+                    logger.info(
+                        f"[{DEVICE_NAME}] Sent kill signal to processes using camera"
+                    )
+                except Exception as e_kill:
+                    logger.error(
+                        f"[{DEVICE_NAME}] Failed to kill camera processes: {e_kill}"
+                    )
+
             _update_camera_state(
                 home_id, "error", f"Error stopping camera: {str(e_stop)}"
             )
@@ -732,6 +837,8 @@ def stop_camera_streaming(home_id: str) -> None:
                 home_id, "offline", "Camera confirmed offline (was already stopped)"
             )
 
+    # Add a small delay before returning to allow any system resources to be fully released
+    time.sleep(1)
     logger.info(f"[{DEVICE_NAME}] Stop_camera_streaming sequence completed.")
 
 
@@ -762,6 +869,51 @@ def _cleanup_camera() -> None:
                 f"[{DEVICE_NAME}] Error during camera resource cleanup: {e_cleanup_cam}",
                 exc_info=True,
             )
+            # Force release camera resources if normal close fails
+            try:
+                logger.info(
+                    f"[{DEVICE_NAME}] Attempting alternative cleanup method to force close camera..."
+                )
+                # Try more aggressively to release the camera
+                if hasattr(_picamera_object, "close"):
+                    # Try multiple times with increasing delays
+                    for i in range(3):
+                        try:
+                            _picamera_object.close()
+                            logger.info(
+                                f"[{DEVICE_NAME}] Forced camera close succeeded on cleanup attempt {i+1}"
+                            )
+                            break
+                        except Exception as e_retry:
+                            logger.warning(
+                                f"[{DEVICE_NAME}] Cleanup retry {i+1} to close camera failed: {e_retry}"
+                            )
+                            time.sleep(1)  # Longer delay with each retry
+            except Exception as e_force:
+                logger.error(
+                    f"[{DEVICE_NAME}] Force close during cleanup also failed: {e_force}"
+                )
+
+            # If everything else fails, try to kill processes
+            try:
+                logger.info(
+                    f"[{DEVICE_NAME}] Last resort: attempting to release camera system resources..."
+                )
+                # Try to identify and kill processes using the camera
+                subprocess.run(
+                    ["sudo", "fuser", "-k", "/dev/video0"],
+                    capture_output=True,
+                    text=True,
+                )
+                # Add a delay after the kill command
+                time.sleep(2)
+                logger.info(
+                    f"[{DEVICE_NAME}] Kill signal sent to processes using camera"
+                )
+            except Exception as e_kill:
+                logger.error(
+                    f"[{DEVICE_NAME}] Failed to kill camera processes: {e_kill}"
+                )
         finally:
             _picamera_object = None
             logger.info(
@@ -771,6 +923,9 @@ def _cleanup_camera() -> None:
         logger.info(
             f"[{DEVICE_NAME}] _picamera_object was already None in _cleanup_camera."
         )
+
+    # Add a delay to allow system resources to be fully released
+    time.sleep(1)
     logger.info(f"[{DEVICE_NAME}] _cleanup_camera sequence completed.")
 
 
