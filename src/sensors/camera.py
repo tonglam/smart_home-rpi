@@ -358,37 +358,52 @@ def _camera_loop(home_id: str) -> None:
         while _is_running.is_set():
             loop_iteration += 1
 
+            frame_captured_this_iteration = False
             if _picamera_object:
                 try:
                     frame = _picamera_object.capture_array()
-
                     _process_and_publish_frame(frame, home_id)
-
+                    frame_captured_this_iteration = True
                 except Exception as e_capture_publish:
                     logger.error(
                         f"[{DEVICE_NAME}] Error during frame capture or publish: {e_capture_publish}",
                         exc_info=True,
                     )
+                    # If capture fails, perhaps the camera is in a bad state.
+                    # Consider stopping the loop or re-initializing.
+                    # For now, just sleep and continue, relying on external restart if persistent.
                     time.sleep(1)
+                    # Continue to the next iteration without trying to handle recording for this failed attempt
                     continue
-
             else:
                 logger.error(
-                    f"PRINT_DEBUG: [{DEVICE_NAME}] _picamera_object is None in loop iteration {loop_iteration}. Skipping capture."
+                    f"PRINT_DEBUG: [{DEVICE_NAME}] _picamera_object is None in loop iteration {loop_iteration}. Skipping capture and recording handling."
                 )
-                time.sleep(1)
+                time.sleep(1)  # Sleep if object is None
+                # Continue to the next iteration if camera object is None
+                continue
 
-            current_time = time.time()
-            try:
-                recording_start_time, is_recording = _handle_recording(
-                    current_time, recording_start_time, is_recording
+            # Only proceed to handle recording if a frame was successfully captured and picamera_object is valid
+            # The check for _picamera_object here is somewhat redundant due to the continue above, but adds clarity.
+            if frame_captured_this_iteration and _picamera_object:
+                current_time = time.time()
+                try:
+                    recording_start_time, is_recording = _handle_recording(
+                        current_time, recording_start_time, is_recording
+                    )
+                except Exception as e_recording:
+                    logger.error(
+                        f"[{DEVICE_NAME}] Error during _handle_recording: {e_recording}",
+                        exc_info=True,
+                    )
+                    # If recording handling fails, sleep and continue the loop.
+                    time.sleep(1)
+            elif not _picamera_object:
+                # This case should ideally be caught by the `else` block above and `continue` executed.
+                # Adding log here for safety in case logic flow changes.
+                logger.warning(
+                    f"[{DEVICE_NAME}] _picamera_object became None before recording handling in loop iteration {loop_iteration}. Skipping."
                 )
-            except Exception as e_recording:
-                logger.error(
-                    f"[{DEVICE_NAME}] Error during _handle_recording: {e_recording}",
-                    exc_info=True,
-                )
-                time.sleep(1)
 
             time.sleep(1.0 / FRAME_RATE)
 
