@@ -31,7 +31,7 @@ DEVICE_TYPE = "camera"
 FRAME_WIDTH = 640
 FRAME_HEIGHT = 480
 FRAME_RATE = 30
-RECORDING_DURATION_SECONDS = 30  # 5 minutes
+RECORDING_DURATION_SECONDS = 300  # 5 minutes
 VIDEO_FILE_PATH = "recording.h264"
 MP4_FILE_PATH = "recording.mp4"
 
@@ -606,34 +606,40 @@ def _update_camera_state(home_id: str, new_state: str, message: str) -> None:
         message: Message describing the state change
     """
     try:
+        if new_state == "error":
+            logger.error(f"[{DEVICE_NAME}] Camera error reported: {message}")
+            # Do not update device state in DB or log an event for errors
+            return
+
         device = get_device_by_id(DEVICE_ID)
         old_state = device.get("current_state") if device else None
 
+        # Proceed with DB update only for non-error states
         update_device_state(DEVICE_ID, new_state)
 
         if old_state != new_state:
-            if new_state == "error":
-                logger.warning(
-                    f"[{DEVICE_NAME}] State changed from {old_state} to error. Error event not logged: {message}"
-                )
-            else:
-                insert_event(
-                    home_id=home_id,
-                    device_id=DEVICE_ID,
-                    event_type="camera_changed",
-                    old_state=old_state,
-                    new_state=new_state,
-                )
-                logger.info(
-                    f"[{DEVICE_NAME}] State changed from {old_state} to {new_state}. Event logged: {message}"
-                )
-        else:
+            # Event logging will only occur for non-error state changes here
+            insert_event(
+                home_id=home_id,
+                device_id=DEVICE_ID,
+                event_type="camera_changed",
+                old_state=old_state,
+                new_state=new_state,
+            )
             logger.info(
-                f"[{DEVICE_NAME}] State remained {new_state}. No event logged for message: {message}"
+                f"[{DEVICE_NAME}] State changed from {old_state} to {new_state}. Event logged. Message: {message}"
+            )
+        else:
+            # This case handles when the state is confirmed but not changed (e.g. already online)
+            logger.info(
+                f"[{DEVICE_NAME}] State remained {new_state}. No event logged. Message: {message}"
             )
 
     except Exception as e:
-        logger.error(f"[{DEVICE_NAME}] Error updating camera state: {e}", exc_info=True)
+        logger.error(
+            f"[{DEVICE_NAME}] Error in _update_camera_state function itself: {e}",
+            exc_info=True,
+        )
 
 
 def stop_camera_streaming(home_id: str) -> None:
@@ -646,47 +652,80 @@ def stop_camera_streaming(home_id: str) -> None:
 
     logger.info(f"[{DEVICE_NAME}] Attempting to stop streaming and recording...")
 
-    _is_running.clear()
+    _is_running.clear()  # Signal the loop to stop
 
     if _camera_thread and _camera_thread.is_alive():
         logger.info(f"[{DEVICE_NAME}] Waiting for camera thread to finish...")
         _camera_thread.join(timeout=5.0)
         if _camera_thread.is_alive():
             logger.warning(f"[{DEVICE_NAME}] Camera thread did not finish in time.")
+        else:
+            logger.info(f"[{DEVICE_NAME}] Camera thread finished.")
+    _camera_thread = None  # Clear the thread reference
 
     if _picamera_object:
+        camera_operations_successful = False
         try:
             logger.info(
-                f"[{DEVICE_NAME}] Stopping recording (if active) and closing camera..."
+                f"[{DEVICE_NAME}] Finalizing camera object: stopping recording (if active) and closing..."
             )
             if hasattr(_picamera_object, "recording") and _picamera_object.recording:
                 logger.info(
-                    f"[{DEVICE_NAME}] Active recording found. Stopping recording."
+                    f"[{DEVICE_NAME}] Active recording found in stop_camera_streaming. Stopping recording."
                 )
                 _picamera_object.stop_recording()
-                logger.info(f"[{DEVICE_NAME}] Active recording stopped.")
+                logger.info(
+                    f"[{DEVICE_NAME}] Recording stopped via stop_camera_streaming."
+                )
 
-            logger.info(f"[{DEVICE_NAME}] Closing Picamera2 object...")
+            logger.info(
+                f"[{DEVICE_NAME}] Closing Picamera2 object via stop_camera_streaming..."
+            )
             _picamera_object.close()
+            logger.info(
+                f"[{DEVICE_NAME}] Picamera2 object closed via stop_camera_streaming."
+            )
+            camera_operations_successful = True
+
+        except Exception as e_stop:
+            logger.error(
+                f"[{DEVICE_NAME}] Error during camera stop/close in stop_camera_streaming: {e_stop}",
+                exc_info=True,
+            )
+            _update_camera_state(
+                home_id, "error", f"Error stopping camera: {str(e_stop)}"
+            )
+        finally:
             _picamera_object = None
-            logger.info(f"[{DEVICE_NAME}] Picamera2 object closed.")
+            logger.info(
+                f"[{DEVICE_NAME}] _picamera_object set to None in stop_camera_streaming."
+            )
 
+        if camera_operations_successful:
             _update_camera_state(home_id, "offline", "Camera streaming stopped")
+    else:
+        logger.info(
+            f"[{DEVICE_NAME}] _picamera_object was already None in stop_camera_streaming. No camera operations to perform."
+        )
+        # If it was supposed to be running, ensure state is offline if no error was previously set
+        device_state = get_device_by_id(DEVICE_ID)
+        if device_state and device_state.get("current_state") not in [
+            "error",
+            "offline",
+        ]:
+            _update_camera_state(
+                home_id, "offline", "Camera confirmed offline (was already stopped)"
+            )
 
-        except Exception as e:
-            logger.error(f"[{DEVICE_NAME}] Error stopping camera: {e}", exc_info=True)
-            _update_camera_state(home_id, "error", f"Error stopping camera: {str(e)}")
-
-    logger.info(
-        f"[{DEVICE_NAME}] Streaming and recording stopped, resources cleaned up."
-    )
+    logger.info(f"[{DEVICE_NAME}] Stop_camera_streaming sequence completed.")
 
 
 def _cleanup_camera() -> None:
     """Clean up camera resources."""
     global _picamera_object, _is_running
 
-    _is_running.clear()
+    logger.info(f"[{DEVICE_NAME}] Initiating _cleanup_camera sequence...")
+    _is_running.clear()  # Ensure loop signal is off
 
     if _picamera_object:
         try:
@@ -702,12 +741,22 @@ def _cleanup_camera() -> None:
 
             logger.info(f"[{DEVICE_NAME}] Closing Picamera2 object during cleanup...")
             _picamera_object.close()
-            _picamera_object = None
             logger.info(f"[{DEVICE_NAME}] Picamera2 object closed during cleanup.")
-        except Exception as e:
+        except Exception as e_cleanup_cam:
             logger.error(
-                f"[{DEVICE_NAME}] Error cleaning up camera: {e}", exc_info=True
+                f"[{DEVICE_NAME}] Error during camera resource cleanup: {e_cleanup_cam}",
+                exc_info=True,
             )
+        finally:
+            _picamera_object = None
+            logger.info(
+                f"[{DEVICE_NAME}] _picamera_object set to None in _cleanup_camera."
+            )
+    else:
+        logger.info(
+            f"[{DEVICE_NAME}] _picamera_object was already None in _cleanup_camera."
+        )
+    logger.info(f"[{DEVICE_NAME}] _cleanup_camera sequence completed.")
 
 
 def _upload_recording_to_r2() -> bool:
