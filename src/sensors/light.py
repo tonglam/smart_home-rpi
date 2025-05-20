@@ -75,7 +75,7 @@ def initialize_light(home_id: str, user_id: str) -> None:
                     insert_event(
                         home_id=home_id,
                         device_id=DEVICE_ID,
-                        event_type="light_initialized",
+                        event_type="light_changed",
                         old_state=f"{db_state}:{db_brightness}",
                         new_state=f"{current_state_str}:{brightness_int}",
                     )
@@ -115,28 +115,32 @@ def set_light_intensity(home_id: str, level: float, user_id: str = None):
         }
         update_device_state(DEVICE_ID, update_payload)
 
-        insert_event(
-            home_id=home_id,
-            device_id=DEVICE_ID,
-            event_type="light_intensity_changed",
-            old_state=str(old_level_float),
-            new_state=str(level),
-        )
+        if old_level_float != level:
+            insert_event(
+                home_id=home_id,
+                device_id=DEVICE_ID,
+                event_type="light_changed",
+                old_state=str(old_level_float),
+                new_state=str(level),
+            )
 
-        # Check if light is being turned on while in away mode
-        if level > 0.0 and old_level_float == 0.0:
-            home_mode = get_home_mode(home_id)
-            if home_mode == "away" and user_id:
-                alert_message = (
-                    "Security Alert: Light turned on while home is in away mode!"
-                )
-                logger.warning(f"[{DEVICE_NAME}] {alert_message}")
-                insert_alert(
-                    home_id=home_id,
-                    user_id=user_id,
-                    device_id=DEVICE_ID,
-                    message=alert_message,
-                )
+            if level > 0.0 and old_level_float == 0.0:
+                home_mode = get_home_mode(home_id)
+                if home_mode == "away" and user_id:
+                    alert_message = (
+                        "Security Alert: Light turned on while home is in away mode!"
+                    )
+                    logger.warning(f"[{DEVICE_NAME}] {alert_message}")
+                    insert_alert(
+                        home_id=home_id,
+                        user_id=user_id,
+                        device_id=DEVICE_ID,
+                        message=alert_message,
+                    )
+        else:
+            logger.info(
+                f"[{DEVICE_NAME}] Light intensity was already {level*100}%. No event logged."
+            )
 
 
 def get_light_intensity() -> float:

@@ -552,15 +552,27 @@ def _update_camera_state(home_id: str, new_state: str, message: str) -> None:
 
         update_device_state(DEVICE_ID, new_state)
 
-        insert_event(
-            home_id=home_id,
-            device_id=DEVICE_ID,
-            event_type="camera_state_changed",
-            old_state=old_state,
-            new_state=new_state,
-        )
+        if old_state != new_state:
+            if new_state == "error":
+                logger.warning(
+                    f"[{DEVICE_NAME}] State changed from {old_state} to error. Error event not logged: {message}"
+                )
+            else:
+                insert_event(
+                    home_id=home_id,
+                    device_id=DEVICE_ID,
+                    event_type="camera_changed",
+                    old_state=old_state,
+                    new_state=new_state,
+                )
+                logger.info(
+                    f"[{DEVICE_NAME}] State changed from {old_state} to {new_state}. Event logged: {message}"
+                )
+        else:
+            logger.info(
+                f"[{DEVICE_NAME}] State remained {new_state}. No event logged for message: {message}"
+            )
 
-        logger.info(f"[{DEVICE_NAME}] State updated to {new_state}: {message}")
     except Exception as e:
         logger.error(f"[{DEVICE_NAME}] Error updating camera state: {e}", exc_info=True)
 

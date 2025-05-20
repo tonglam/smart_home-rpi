@@ -47,7 +47,7 @@ def _on_door_opened_logic(
     insert_event(
         home_id=home_id,
         device_id=DEVICE_ID,
-        event_type="door_opened",
+        event_type="door_changed",
         old_state=actual_old_state,
         new_state="open",
     )
@@ -83,7 +83,7 @@ def _on_door_closed_logic(home_id: str, old_state_from_loop: Optional[str]):
     insert_event(
         home_id=home_id,
         device_id=DEVICE_ID,
-        event_type="door_closed",
+        event_type="door_changed",
         old_state=actual_old_state,
         new_state="closed",
     )

@@ -105,7 +105,7 @@ def _lux_monitoring_loop(home_id: str) -> None:
                 insert_event(
                     home_id=home_id,
                     device_id=DEVICE_ID,
-                    event_type="lux_level",
+                    event_type="lux_changed",
                     old_state=None,
                     new_state=current_status_str,
                 )
@@ -123,7 +123,7 @@ def _lux_monitoring_loop(home_id: str) -> None:
                 insert_event(
                     home_id=home_id,
                     device_id=DEVICE_ID,
-                    event_type="lux_level",
+                    event_type="lux_changed",
                     old_state=old_state_str,
                     new_state=current_status_str,
                 )

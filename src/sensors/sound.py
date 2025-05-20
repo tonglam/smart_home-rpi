@@ -40,7 +40,7 @@ def _handle_disconnection():
         insert_event(
             home_id=device.get("home_id"),
             device_id=DEVICE_ID,
-            event_type="sensor_disconnected",
+            event_type="sensor_changed",
             old_state=old_state,
             new_state="disconnected",
         )
@@ -56,7 +56,6 @@ def _check_sensor_health() -> bool:
         if not _sound_sensor:
             return False
 
-        # Try to read pin state
         pin_state = _sound_sensor.value
         if pin_state is None:
             return False
@@ -73,7 +72,6 @@ def _process_sound_detection():
     global _last_detection_time
     current_time = time.time()
 
-    # Check cooldown
     if current_time - _last_detection_time < DETECTION_COOLDOWN:
         logger.debug(
             f"[{DEVICE_NAME}] Skipping detection due to cooldown ({DETECTION_COOLDOWN}s)"
@@ -84,29 +82,24 @@ def _process_sound_detection():
     logger.info(f"[{DEVICE_NAME}] Sound event detected (Pin {GPIO_PIN_SOUND} active).")
 
     try:
-        # Verify sensor is still connected
         if _sound_sensor and _sound_sensor.value is not None:
             logger.debug(
                 f"[{DEVICE_NAME}] Pin state during detection: {_sound_sensor.value}"
             )
 
-            # Update device state
             update_device_state(DEVICE_ID, "detected")
 
-            # Get the current device to check previous state
             device = get_device_by_id(DEVICE_ID)
             if device:
                 home_id = device.get("home_id")
                 old_state = device.get("current_state", "idle")
 
-                # Only log event when home is in away mode
                 home_mode = get_home_mode(home_id)
                 if home_mode == "away":
-                    # Log the event
                     insert_event(
                         home_id=home_id,
                         device_id=DEVICE_ID,
-                        event_type="sound_detected",
+                        event_type="sound_changed",
                         old_state=old_state,
                         new_state="detected",
                     )
@@ -138,20 +131,18 @@ def _sound_monitoring_loop():
         while _is_monitoring.is_set():
             current_time = time.time()
 
-            # Periodic health check
             if current_time - _last_health_check_time >= HEALTH_CHECK_INTERVAL:
                 _last_health_check_time = current_time
 
                 if not _check_sensor_health():
                     _handle_disconnection()
-                    time.sleep(1)  # Wait before retrying
+                    time.sleep(1)
                     continue
 
-            # Check if sound is detected
             if _sound_sensor and _sound_sensor.value:
                 _process_sound_detection()
 
-            time.sleep(0.1)  # Quick sleep for responsive monitoring
+            time.sleep(0.1)
 
     except Exception as e:
         logger.error(f"[{DEVICE_NAME}] Error in monitoring loop: {e}")
