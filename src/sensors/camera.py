@@ -198,54 +198,55 @@ def _convert_h264_to_mp4(input_path: str, output_path: str) -> bool:
         return False
 
 
-def _upload_recording_to_r2() -> bool:
-    """Upload the recorded MP4 video file to R2 storage and clean up the local MP4 file.
-
-    Assumes MP4_FILE_PATH is the file to upload.
-
-    Returns:
-        bool: True if upload was successful and MP4 was handled, False otherwise.
+def _process_segment_after_recording_stops() -> None:
     """
-    if not os.path.exists(MP4_FILE_PATH):
-        logger.error(
-            f"[{DEVICE_NAME}] MP4 file not found for upload: {MP4_FILE_PATH}. Nothing to upload."
+    Processes the most recently recorded H264 segment (VIDEO_FILE_PATH):
+    Converts to MP4, uploads to R2, and cleans up local files.
+    Assumes recording was just stopped and VIDEO_FILE_PATH is the target.
+    """
+    if not os.path.exists(VIDEO_FILE_PATH):
+        logger.warning(
+            f"[{DEVICE_NAME}] H264 file {VIDEO_FILE_PATH} not found for post-stop processing. Cannot convert or upload."
         )
-        return False
+        return
 
-    upload_successful = False
-    try:
-        r2_path = os.path.basename(MP4_FILE_PATH)
+    logger.info(f"[{DEVICE_NAME}] Processing segment: {VIDEO_FILE_PATH}")
+    conversion_successful = _convert_h264_to_mp4(VIDEO_FILE_PATH, MP4_FILE_PATH)
+
+    if conversion_successful:
         logger.info(
-            f"[{DEVICE_NAME}] Attempting to upload {MP4_FILE_PATH} to R2 as {r2_path}..."
+            f"[{DEVICE_NAME}] Conversion to MP4 successful for segment: {MP4_FILE_PATH}"
         )
-
-        if upload_file_to_r2(MP4_FILE_PATH, r2_path):
-            logger.info(f"[{DEVICE_NAME}] MP4 video uploaded to R2: {r2_path}")
-            upload_successful = True
-        else:
-            logger.error(
-                f"[{DEVICE_NAME}] Failed to upload MP4 video to R2: {MP4_FILE_PATH}"
-            )
-            upload_successful = False
-        return upload_successful
-    except Exception as e:
+        _upload_recording_to_r2()
+    else:
         logger.error(
-            f"[{DEVICE_NAME}] Error during MP4 R2 upload process for {MP4_FILE_PATH}: {e}",
-            exc_info=True,
+            f"[{DEVICE_NAME}] Failed to convert segment {VIDEO_FILE_PATH} to MP4. It will not be uploaded."
         )
-        return False
-    finally:
+        # If conversion fails, MP4_FILE_PATH might be a leftover from ffmpeg; clean it up
+        # as _upload_recording_to_r2 won't be called to clean it.
         if os.path.exists(MP4_FILE_PATH):
             try:
                 os.remove(MP4_FILE_PATH)
                 logger.info(
-                    f"[{DEVICE_NAME}] Removed local MP4 file after upload attempt: {MP4_FILE_PATH}"
+                    f"[{DEVICE_NAME}] Cleaned up unconverted/failed MP4: {MP4_FILE_PATH}"
                 )
-            except Exception as e_remove_mp4:
+            except Exception as e_remove_failed_mp4:
                 logger.error(
-                    f"[{DEVICE_NAME}] Error removing local MP4 file {MP4_FILE_PATH}: {e_remove_mp4}",
-                    exc_info=True,
+                    f"[{DEVICE_NAME}] Error removing failed/orphaned MP4 {MP4_FILE_PATH}: {e_remove_failed_mp4}"
                 )
+
+    # Clean up the H264 file in all cases after processing attempt
+    # Re-check existence as a safeguard, though it should normally exist if we got this far.
+    if os.path.exists(VIDEO_FILE_PATH):
+        try:
+            os.remove(VIDEO_FILE_PATH)
+            logger.info(
+                f"[{DEVICE_NAME}] Removed local H264 file after processing attempt: {VIDEO_FILE_PATH}"
+            )
+        except Exception as e_remove_h264:
+            logger.error(
+                f"[{DEVICE_NAME}] Error removing local H264 file {VIDEO_FILE_PATH}: {e_remove_h264}"
+            )
 
 
 def _handle_recording(
@@ -300,41 +301,21 @@ def _handle_recording(
         _picamera_object.stop_recording()
         logger.info(f"[{DEVICE_NAME}] Current recording stopped: {VIDEO_FILE_PATH}")
 
-        if os.path.exists(VIDEO_FILE_PATH):
-            if _convert_h264_to_mp4(VIDEO_FILE_PATH, MP4_FILE_PATH):
-                logger.info(
-                    f"[{DEVICE_NAME}] Conversion to MP4 successful: {MP4_FILE_PATH}"
-                )
-                _upload_recording_to_r2()
-            else:
-                logger.error(
-                    f"[{DEVICE_NAME}] Failed to convert {VIDEO_FILE_PATH} to MP4. It will not be uploaded."
-                )
-
-            try:
-                os.remove(VIDEO_FILE_PATH)
-                logger.info(
-                    f"[{DEVICE_NAME}] Removed local H264 file: {VIDEO_FILE_PATH}"
-                )
-            except Exception as e_remove_h264:
-                logger.error(
-                    f"[{DEVICE_NAME}] Error removing local H264 file {VIDEO_FILE_PATH}: {e_remove_h264}"
-                )
-        else:
-            logger.warning(
-                f"[{DEVICE_NAME}] H264 file {VIDEO_FILE_PATH} not found after stopping recording. Cannot convert or upload."
-            )
+        _process_segment_after_recording_stops()  # Process the segment that just stopped
 
         logger.info(f"[{DEVICE_NAME}] Starting new recording segment...")
+        # Safeguard: Clean up any potentially orphaned MP4 file from a previous cycle
+        # before starting a new H264 recording. _process_segment_after_recording_stops
+        # and _upload_recording_to_r2 should handle their own MP4s, but this is an extra check.
         if os.path.exists(MP4_FILE_PATH):
             logger.warning(
-                f"[{DEVICE_NAME}] Cleaning up MP4 before new H264 recording: {MP4_FILE_PATH}"
+                f"[{DEVICE_NAME}] Cleaning up potentially orphaned MP4 {MP4_FILE_PATH} before new H264 recording start."
             )
             try:
                 os.remove(MP4_FILE_PATH)
             except Exception as e_mp4_pre_clean:
                 logger.error(
-                    f"[{DEVICE_NAME}] Error pre-cleaning MP4 file {MP4_FILE_PATH}: {e_mp4_pre_clean}"
+                    f"[{DEVICE_NAME}] Error pre-cleaning orphaned MP4 file {MP4_FILE_PATH}: {e_mp4_pre_clean}"
                 )
 
         _picamera_object.start_recording(H264Encoder(), VIDEO_FILE_PATH)
@@ -417,20 +398,51 @@ def _camera_loop(home_id: str) -> None:
         )
 
     finally:
-        if is_recording and _picamera_object:
+        # Check if the camera object exists and is currently recording
+        if (
+            _picamera_object
+            and hasattr(_picamera_object, "recording")
+            and _picamera_object.recording
+        ):
             logger.info(
-                f"[{DEVICE_NAME}] Stopping final recording (from camera_loop finally block)..."
+                f"[{DEVICE_NAME}] Loop ending. Stopping and processing final recording segment..."
             )
             try:
                 _picamera_object.stop_recording()
                 logger.info(
-                    f"[{DEVICE_NAME}] Final recording stopped (from camera_loop finally block)."
+                    f"[{DEVICE_NAME}] Final recording segment stopped: {VIDEO_FILE_PATH}"
                 )
+                _process_segment_after_recording_stops()  # Process the final segment
             except Exception as e_stop_final:
                 logger.error(
-                    f"[{DEVICE_NAME}] Error stopping final recording in finally block: {e_stop_final}",
+                    f"[{DEVICE_NAME}] Error stopping/processing final recording segment: {e_stop_final}",
                     exc_info=True,
                 )
+        elif (
+            is_recording and _picamera_object
+        ):  # is_recording was true, but camera says it's not recording
+            # This case could occur if the loop exited while is_recording was true,
+            # but _picamera_object.recording became false due to an error or other reason
+            # before this finally block could stop it. The H264 file might still exist.
+            logger.warning(
+                f"[{DEVICE_NAME}] Loop ending. 'is_recording' was true, but Picamera2 object shows not currently recording. "
+                f"Checking for potentially unprocessed segment {VIDEO_FILE_PATH}."
+            )
+            if os.path.exists(VIDEO_FILE_PATH):
+                logger.info(
+                    f"[{DEVICE_NAME}] Found unprocessed H264 segment {VIDEO_FILE_PATH} from 'is_recording' state. Attempting to process."
+                )
+                _process_segment_after_recording_stops()
+            else:
+                logger.info(
+                    f"[{DEVICE_NAME}] No H264 segment file found at {VIDEO_FILE_PATH} to process based on 'is_recording' state."
+                )
+        elif not _picamera_object and is_recording:
+            logger.warning(
+                f"[{DEVICE_NAME}] Loop ending. 'is_recording' was true, but _picamera_object is None. "
+                f"Cannot process final segment for {VIDEO_FILE_PATH}."
+            )
+
         logger.info(f"[{DEVICE_NAME}] Camera loop ended (iteration {loop_iteration}).")
 
 
@@ -696,3 +708,41 @@ def _cleanup_camera() -> None:
             logger.error(
                 f"[{DEVICE_NAME}] Error cleaning up camera: {e}", exc_info=True
             )
+
+
+def _upload_recording_to_r2() -> bool:
+    """Upload the recorded MP4 video file to R2 storage and clean up the local MP4 file.
+
+    Returns:
+        bool: True if upload was successful, False otherwise
+    """
+    if not os.path.exists(MP4_FILE_PATH):
+        logger.error(f"[{DEVICE_NAME}] MP4 file {MP4_FILE_PATH} not found for upload.")
+        return False
+
+    logger.info(f"[{DEVICE_NAME}] Uploading {MP4_FILE_PATH} to R2...")
+    try:
+        upload_successful = upload_file_to_r2(MP4_FILE_PATH)
+        if upload_successful:
+            logger.info(
+                f"[{DEVICE_NAME}] MP4 file {MP4_FILE_PATH} uploaded successfully."
+            )
+            if os.path.exists(MP4_FILE_PATH):
+                try:
+                    os.remove(MP4_FILE_PATH)
+                    logger.info(
+                        f"[{DEVICE_NAME}] Local MP4 file {MP4_FILE_PATH} removed after upload."
+                    )
+                except Exception as e_remove_mp4:
+                    logger.error(
+                        f"[{DEVICE_NAME}] Error removing local MP4 file {MP4_FILE_PATH}: {e_remove_mp4}"
+                    )
+            return True
+        else:
+            logger.error(f"[{DEVICE_NAME}] MP4 file {MP4_FILE_PATH} upload failed.")
+            return False
+    except Exception as e_upload:
+        logger.error(
+            f"[{DEVICE_NAME}] Error uploading MP4 file to R2: {e_upload}", exc_info=True
+        )
+        return False
