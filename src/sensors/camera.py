@@ -591,6 +591,14 @@ def stop_camera_streaming(home_id: str) -> None:
                     f"[{DEVICE_NAME}] Final check: stopping active recording before camera close."
                 )
                 _picamera_object.stop_recording()
+                logger.info(f"[{DEVICE_NAME}] Active recording stopped.")
+
+            logger.info(
+                f"[{DEVICE_NAME}] Stopping camera stream (_picamera_object.stop())."
+            )
+            _picamera_object.stop()
+            logger.info(f"[{DEVICE_NAME}] Camera stream stopped.")
+
             _picamera_object.close()
             _picamera_object = None
             logger.info(f"[{DEVICE_NAME}] Camera stopped and closed.")
@@ -614,15 +622,25 @@ def _cleanup_camera() -> None:
 
     if _picamera_object:
         try:
-            logger.info(f"[{DEVICE_NAME}] Stopping and closing camera...")
+            logger.info(
+                f"[{DEVICE_NAME}] Cleaning up camera: stopping recording, stopping stream, and closing."
+            )
             if hasattr(_picamera_object, "recording") and _picamera_object.recording:
                 logger.info(
-                    f"[{DEVICE_NAME}] Final check: stopping active recording before camera close."
+                    f"[{DEVICE_NAME}] Active recording found during cleanup. Stopping recording."
                 )
                 _picamera_object.stop_recording()
+                logger.info(f"[{DEVICE_NAME}] Recording stopped during cleanup.")
+
+            logger.info(
+                f"[{DEVICE_NAME}] Stopping camera stream (_picamera_object.stop()) during cleanup."
+            )
+            _picamera_object.stop()
+            logger.info(f"[{DEVICE_NAME}] Camera stream stopped during cleanup.")
+
             _picamera_object.close()
             _picamera_object = None
-            logger.info(f"[{DEVICE_NAME}] Camera stopped and closed.")
+            logger.info(f"[{DEVICE_NAME}] Camera stopped and closed during cleanup.")
         except Exception as e:
             logger.error(
                 f"[{DEVICE_NAME}] Error cleaning up camera: {e}", exc_info=True
