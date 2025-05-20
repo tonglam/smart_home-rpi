@@ -141,7 +141,6 @@ def set_light_intensity(home_id: str, level: float, user_id: Optional[str] = Non
                 event_type="light_changed",
                 old_state=str(old_level_float),
                 new_state=str(level),
-                user_id=user_id,
             )
 
             if level > 0.0 and old_level_float == 0.0:
