@@ -36,7 +36,7 @@ VIDEO_FILE_PATH = "recording.h264"
 MP4_FILE_PATH = "recording.mp4"
 
 # MQTT topics
-MQTT_CAMERA_LIVE_TOPIC = "live"
+MQTT_CAMERA_LIVE_TOPIC = f"camera/{DEVICE_ID}/live"
 
 # Global state
 _picamera_object: Optional[Picamera2] = None
@@ -54,76 +54,122 @@ def _setup_camera() -> bool:
     try:
         logger.info(f"[{DEVICE_NAME}] Initializing camera...")
 
-        # First check if there are any existing camera processes
+        # First try to kill any existing camera processes
         try:
-            # Use subprocess to check for other processes using the camera
-            ps_output = subprocess.run(
-                ["ps", "-ef", "|", "grep", "libcamera"],
+            logger.info(
+                f"[{DEVICE_NAME}] Checking for and killing existing camera processes..."
+            )
+            # Check for processes using the camera
+            subprocess.run(
+                ["sudo", "fuser", "-k", "/dev/video0"],
                 capture_output=True,
                 text=True,
-                shell=True,
+                check=False,
             )
-            if "libcamera" in ps_output.stdout and "grep" not in ps_output.stdout:
-                logger.warning(
-                    f"[{DEVICE_NAME}] Other camera processes may be running: {ps_output.stdout}"
-                )
+            # Check specifically for libcamera processes
+            subprocess.run(
+                ["pkill", "-f", "libcamera"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            # Add a delay to ensure processes are terminated
+            time.sleep(3)
         except Exception as e_ps:
             logger.warning(
-                f"[{DEVICE_NAME}] Unable to check for other camera processes: {e_ps}"
+                f"[{DEVICE_NAME}] Unable to kill existing camera processes: {e_ps}"
             )
 
         # Add a delay before trying to initialize camera
         time.sleep(2)
 
-        _picamera_object = Picamera2()
-
-        # Configure camera
-        config = _picamera_object.create_video_configuration(
-            main={"size": (FRAME_WIDTH, FRAME_HEIGHT), "format": "RGB888"}
-        )
-        _picamera_object.configure(config)
-
-        # Add a delay after configure before starting
-        time.sleep(1)
-
-        _picamera_object.start()
-
-        logger.info(f"[{DEVICE_NAME}] Camera started successfully.")
-        return True
-    except RuntimeError as e:
-        if "Failed to acquire camera: Device or resource busy" in str(e):
-            logger.error(
-                f"[{DEVICE_NAME}] Camera is already in use by another process. Try restarting the device or killing other camera processes."
-            )
-            # Try to identify the process using the camera
+        # Attempt to initialize the camera with retries
+        max_retries = 3
+        for attempt in range(max_retries):
             try:
-                subprocess.run(
-                    ["sudo", "fuser", "-v", "/dev/video0"],
-                    capture_output=True,
-                    text=True,
+                logger.info(
+                    f"[{DEVICE_NAME}] Attempting to initialize camera (attempt {attempt+1}/{max_retries})..."
                 )
-            except Exception:
-                pass
-        elif "Permission denied" in str(e):
-            logger.error(
-                f"[{DEVICE_NAME}] Permission denied accessing camera. Ensure the user has video group permissions."
-            )
-            # Suggest a fix
-            logger.info(
-                f"[{DEVICE_NAME}] Try: sudo usermod -a -G video $USER && sudo reboot"
-            )
-        else:
-            logger.error(f"[{DEVICE_NAME}] Error setting up camera: {e}", exc_info=True)
+                _picamera_object = Picamera2()
 
-        if _picamera_object:
-            try:
-                _picamera_object.close()
-            except Exception:
-                pass
-            _picamera_object = None
-        return False
+                # Configure camera
+                config = _picamera_object.create_video_configuration(
+                    main={"size": (FRAME_WIDTH, FRAME_HEIGHT), "format": "RGB888"}
+                )
+                _picamera_object.configure(config)
+
+                # Add a delay after configure before starting
+                time.sleep(1)
+
+                _picamera_object.start()
+
+                logger.info(
+                    f"[{DEVICE_NAME}] Camera started successfully on attempt {attempt+1}."
+                )
+                return True
+            except RuntimeError as e:
+                if "Failed to acquire camera: Device or resource busy" in str(e):
+                    logger.warning(
+                        f"[{DEVICE_NAME}] Camera is busy on attempt {attempt+1}. Trying again after cleanup..."
+                    )
+                    # Try to kill processes again
+                    try:
+                        subprocess.run(
+                            ["sudo", "fuser", "-k", "/dev/video0"],
+                            capture_output=True,
+                            text=True,
+                            check=False,
+                        )
+                    except Exception:
+                        pass
+                    # Wait longer with each retry
+                    time.sleep(3 + attempt * 2)
+                    # Cleanup any partially initialized camera object
+                    if _picamera_object:
+                        try:
+                            _picamera_object.close()
+                        except Exception:
+                            pass
+                        _picamera_object = None
+                elif "Permission denied" in str(e):
+                    logger.error(
+                        f"[{DEVICE_NAME}] Permission denied accessing camera. Ensure the user has video group permissions."
+                    )
+                    # Suggest a fix
+                    logger.info(
+                        f"[{DEVICE_NAME}] Try: sudo usermod -a -G video $USER && sudo reboot"
+                    )
+                    return False
+                else:
+                    logger.error(
+                        f"[{DEVICE_NAME}] Error setting up camera: {e}", exc_info=True
+                    )
+                    return False
+
+                # If this was the last attempt, log the failure
+                if attempt == max_retries - 1:
+                    logger.error(
+                        f"[{DEVICE_NAME}] Failed to initialize camera after {max_retries} attempts."
+                    )
+                    return False
+            except Exception as e:
+                logger.error(
+                    f"[{DEVICE_NAME}] Unexpected error setting up camera: {e}",
+                    exc_info=True,
+                )
+                if _picamera_object:
+                    try:
+                        _picamera_object.close()
+                    except Exception:
+                        pass
+                    _picamera_object = None
+                return False
+
+        return False  # This should not be reached, but added for clarity
     except Exception as e:
-        logger.error(f"[{DEVICE_NAME}] Error setting up camera: {e}", exc_info=True)
+        logger.error(
+            f"[{DEVICE_NAME}] Error in overall camera setup: {e}", exc_info=True
+        )
         if _picamera_object:
             try:
                 _picamera_object.close()
