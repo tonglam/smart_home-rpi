@@ -443,22 +443,38 @@ def start_camera_streaming(home_id: str) -> None:
     logger.info(
         f"[{DEVICE_NAME}] start_camera_streaming entered for HOME_ID: {home_id}"
     )
-    global _picamera_object, _camera_thread
+    global _picamera_object, _camera_thread, _is_running
+
+    if _camera_thread and _camera_thread.is_alive() and _is_running.is_set():
+        device_db_info = get_device_by_id(DEVICE_ID)
+        if device_db_info:
+            if device_db_info.get("current_state") == "online":
+                logger.info(
+                    f"[{DEVICE_NAME}] Camera is already running and DB state is 'online'. No action needed."
+                )
+                return
+            else:
+                logger.warning(
+                    f"[{DEVICE_NAME}] Camera is running, but DB state is '{device_db_info.get('current_state')}'. Updating DB to 'online'."
+                )
+                _update_camera_state(
+                    home_id, "online", "Reconciled running state to DB"
+                )
+                return
+        else:
+            logger.warning(
+                f"[{DEVICE_NAME}] Camera process is running, but device not found in DB. Proceeding with stop and full re-initialization."
+            )
 
     logger.info(
-        f"[{DEVICE_NAME}] Attempting to start streaming and recording for HOME_ID: {home_id}..."
+        f"[{DEVICE_NAME}] Proceeding with camera start/restart sequence for HOME_ID: {home_id}..."
     )
 
-    device = get_device_by_id(DEVICE_ID)
-    if device and device.get("current_state") == "online":
-        logger.warning(
-            f"[{DEVICE_NAME}] Camera is already marked as online in database. Will attempt to restart by cleaning up."
-        )
-        _cleanup_camera()
-        logger.info(
-            f"[{DEVICE_NAME}] _cleanup_camera called after finding device online."
-        )
-        device = None
+    logger.info(
+        f"[{DEVICE_NAME}] Ensuring previous camera instance is stopped before starting..."
+    )
+    stop_camera_streaming(home_id)
+    logger.info(f"[{DEVICE_NAME}] Previous camera instance stop sequence completed.")
 
     if not _setup_camera():
         logger.error(f"[{DEVICE_NAME}] Failed to setup camera hardware.")
@@ -485,7 +501,8 @@ def start_camera_streaming(home_id: str) -> None:
     try:
         current_device_in_db = get_device_by_id(DEVICE_ID)
         logger.info(
-            f"[{DEVICE_NAME}] Fetched current_device_in_db: {current_device_in_db is not None}"
+            f"[{DEVICE_NAME}] Fetched current_device_in_db status: {'Exists' if current_device_in_db else 'Not Found'}"
+            f" (State: {current_device_in_db.get('current_state') if current_device_in_db else 'N/A'})"
         )
 
         if not current_device_in_db:
@@ -501,40 +518,70 @@ def start_camera_streaming(home_id: str) -> None:
                 logger.error(
                     f"[{DEVICE_NAME}] Failed to register/insert device into DB."
                 )
-                _cleanup_camera()
+                _cleanup_camera()  # Clean up hardware
                 logger.info(
                     f"[{DEVICE_NAME}] Exiting start_camera_streaming due to DB insert failure."
                 )
                 return
-            logger.info(f"[{DEVICE_NAME}] Device inserted successfully.")
+            logger.info(
+                f"[{DEVICE_NAME}] Device inserted successfully with 'initializing' state."
+            )
         else:
-            logger.info(f"[{DEVICE_NAME}] Device already exists in DB.")
+            logger.info(
+                f"[{DEVICE_NAME}] Device already exists in DB (current state: {current_device_in_db.get('current_state')}). Will be updated to 'online'."
+            )
 
         logger.info(f"[{DEVICE_NAME}] Calling _update_camera_state to set 'online'...")
         _update_camera_state(home_id, "online", "Camera streaming started")
 
         logger.info(f"[{DEVICE_NAME}] Setting _is_running event.")
         _is_running.set()
+
+        if _camera_thread and _camera_thread.is_alive():
+            logger.warning(
+                f"[{DEVICE_NAME}] _camera_thread unexpectedly alive before new thread creation. This implies an issue in stop logic."
+            )
+            _camera_thread.join(timeout=2.0)
+            if _camera_thread.is_alive():
+                logger.error(
+                    f"[{DEVICE_NAME}] CRITICAL: Previous camera thread could not be stopped. Aborting start."
+                )
+                _is_running.clear()
+                _cleanup_camera()
+                _update_camera_state(
+                    home_id, "error", "Failed to stop prior camera thread"
+                )
+                return
+
         _camera_thread = threading.Thread(target=_camera_loop, args=(home_id,))
         _camera_thread.daemon = True
         logger.info(f"[{DEVICE_NAME}] Attempting to start _camera_thread...")
         _camera_thread.start()
+
         if _camera_thread.is_alive():
             logger.info(
                 f"[{DEVICE_NAME}] _camera_thread.start() called and thread is alive."
             )
         else:
             logger.error(
-                f"[{DEVICE_NAME}] _camera_thread.start() was called BUT THREAD IS NOT ALIVE."
+                f"[{DEVICE_NAME}] _camera_thread.start() was called BUT THREAD IS NOT ALIVE. Potential issue starting thread."
             )
+            _is_running.clear()
+            _cleanup_camera()
+            _update_camera_state(home_id, "error", "Failed to start camera_loop thread")
+            return
+
         logger.info(
             f"[{DEVICE_NAME}] Main try block for device registration and thread start completed."
         )
 
     except Exception as e:
-        logger.error(f"[{DEVICE_NAME}] Error starting camera: {e}", exc_info=True)
+        logger.error(
+            f"[{DEVICE_NAME}] Error during camera start sequence: {e}", exc_info=True
+        )
         _cleanup_camera()
         _update_camera_state(home_id, "error", f"Error starting camera: {str(e)}")
+
     logger.info(f"[{DEVICE_NAME}] Exiting start_camera_streaming function.")
 
 

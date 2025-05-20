@@ -23,74 +23,93 @@ _led: Optional[PWMLED] = None
 _led_lock = threading.Lock()  # Lock for thread-safe LED operations
 
 
-def initialize_light(home_id: str, user_id: str) -> None:
-    """Initialize the light device and register it in the database if not present."""
+def initialize_light(home_id: str, user_id: Optional[str] = None) -> None:
+    """Initialize the light device, ensure hardware is ready, and synchronize its state with the database."""
     global _led
     logger.info(
-        f"[{DEVICE_NAME}] Initializing light for HOME_ID: {home_id}, USER_ID: {user_id}"
+        f"[{DEVICE_NAME}] Attempting to initialize/synchronize light for HOME_ID: {home_id}"
     )
 
-    try:
-        with _led_lock:
-            _led = PWMLED(LED_PIN)
-
-            device = get_device_by_id(DEVICE_ID)
-            if not device:
+    with _led_lock:
+        if _led is None:
+            try:
+                _led = PWMLED(LED_PIN)
                 logger.info(
-                    f"[{DEVICE_NAME}] First time initialization. Registering device..."
+                    f"[{DEVICE_NAME}] PWMLED hardware initialized on pin {LED_PIN}."
                 )
-                initial_intensity_float = _led.value
-                current_state_str = "on" if initial_intensity_float > 0.0 else "off"
-                brightness_int = int(initial_intensity_float * 100)
+            except Exception as e_init_hw:
+                logger.error(
+                    f"[{DEVICE_NAME}] Critical error initializing PWMLED on pin {LED_PIN}: {e_init_hw}",
+                    exc_info=True,
+                )
+                return
 
-                insert_device(
-                    device_id=DEVICE_ID,
+        current_intensity_float = _led.value
+
+        current_intensity_float = _led.value
+        current_state_str = "on" if current_intensity_float > 0.0 else "off"
+        brightness_int = int(current_intensity_float * 100)
+
+        device_in_db = get_device_by_id(DEVICE_ID)
+
+        if not device_in_db:
+            logger.info(
+                f"[{DEVICE_NAME}] Device not found in database. Registering with current hardware state: {current_state_str}, brightness: {brightness_int}%"
+            )
+            insert_device(
+                device_id=DEVICE_ID,
+                home_id=home_id,
+                name=DEVICE_NAME,
+                type=DEVICE_TYPE,
+                current_state=current_state_str,
+                brightness=brightness_int,
+            )
+            insert_event(
+                home_id=home_id,
+                device_id=DEVICE_ID,
+                event_type="light_registered",
+                old_state="not_registered",
+                new_state=f"state:{current_state_str},brightness:{brightness_int}",
+                user_id=user_id,
+            )
+            logger.info(f"[{DEVICE_NAME}] Device registered successfully.")
+        else:
+            db_state = device_in_db.get("current_state")
+            db_brightness = device_in_db.get("brightness")
+
+            if not isinstance(db_brightness, int):
+                logger.warning(
+                    f"[{DEVICE_NAME}] DB brightness was not an int ('{db_brightness}'), defaulting to 0 for comparison."
+                )
+                db_brightness = 0
+
+            if db_state != current_state_str or db_brightness != brightness_int:
+                logger.info(
+                    f"[{DEVICE_NAME}] Hardware state ({current_state_str}, {brightness_int}%) differs from DB ({db_state}, {db_brightness}%). Synchronizing DB."
+                )
+                update_payload = {
+                    "current_state": current_state_str,
+                    "brightness": brightness_int,
+                }
+                update_device_state(DEVICE_ID, update_payload)
+                insert_event(
                     home_id=home_id,
-                    name=DEVICE_NAME,
-                    type=DEVICE_TYPE,
-                    current_state=current_state_str,
-                    brightness=brightness_int,
+                    device_id=DEVICE_ID,
+                    event_type="light_state_sync",
+                    old_state=f"state:{db_state},brightness:{db_brightness}",
+                    new_state=f"state:{current_state_str},brightness:{brightness_int}",
+                    user_id=user_id,
                 )
-                logger.info(
-                    f"[{DEVICE_NAME}] Device registered with state: {current_state_str}, brightness: {brightness_int}%"
-                )
+                logger.info(f"[{DEVICE_NAME}] Database synchronized to hardware state.")
             else:
-                current_intensity_float = _led.value
-                current_state_str = "on" if current_intensity_float > 0.0 else "off"
-                brightness_int = int(current_intensity_float * 100)
-
-                db_state = device.get("current_state")
-                db_brightness = device.get("brightness", 0)
-
-                if db_state != current_state_str or db_brightness != brightness_int:
-                    logger.info(
-                        f"[{DEVICE_NAME}] Updating device state to match hardware..."
-                    )
-                    update_payload = {
-                        "current_state": current_state_str,
-                        "brightness": brightness_int,
-                    }
-                    update_device_state(DEVICE_ID, update_payload)
-
-                    insert_event(
-                        home_id=home_id,
-                        device_id=DEVICE_ID,
-                        event_type="light_changed",
-                        old_state=f"{db_state}:{db_brightness}",
-                        new_state=f"{current_state_str}:{brightness_int}",
-                    )
-
                 logger.info(
-                    f"[{DEVICE_NAME}] Device state synchronized. Current state: {current_state_str}, brightness: {brightness_int}%"
+                    f"[{DEVICE_NAME}] Light already initialized and database state is consistent ({current_state_str}, {brightness_int}%). No changes made."
                 )
 
-        logger.info(f"[{DEVICE_NAME}] Initialization complete.")
-    except Exception as e:
-        logger.error(f"[{DEVICE_NAME}] Error during initialization: {e}")
-        raise
+    logger.info(f"[{DEVICE_NAME}] Initialization/synchronization complete.")
 
 
-def set_light_intensity(home_id: str, level: float, user_id: str = None):
+def set_light_intensity(home_id: str, level: float, user_id: Optional[str] = None):
     """Set the light intensity to a specific level."""
     with _led_lock:
         if _led is None:
@@ -154,13 +173,13 @@ def get_light_intensity() -> float:
         return _led.value
 
 
-def turn_light_on(home_id: str, user_id: str = None):
+def turn_light_on(home_id: str, user_id: Optional[str] = None):
     """Turn the light on (set to maximum intensity)."""
     logger.info(f"[{DEVICE_NAME}] Turning light on.")
     set_light_intensity(home_id, 1.0, user_id)
 
 
-def turn_light_off(home_id: str, user_id: str = None):
+def turn_light_off(home_id: str, user_id: Optional[str] = None):
     """Turn the light off."""
     logger.info(f"[{DEVICE_NAME}] Turning light off.")
     set_light_intensity(home_id, 0.0, user_id)
