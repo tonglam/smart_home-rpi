@@ -25,8 +25,8 @@ _monitoring_thread: Optional[threading.Thread] = None
 _is_monitoring = threading.Event()
 _last_detection_time = 0
 _last_health_check_time = 0
-DETECTION_COOLDOWN = 60.0  # 30 second cooldown between detections (changed from 10s)
-HEALTH_CHECK_INTERVAL = 30.0  # Check sensor health every 5 seconds
+DETECTION_COOLDOWN = 600.0  # 1 minute cooldown between detections
+HEALTH_CHECK_INTERVAL = 30.0  # Check sensor health every 30 seconds
 
 
 def _handle_disconnection():
