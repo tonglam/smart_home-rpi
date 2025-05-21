@@ -28,7 +28,6 @@ _monitoring_thread: Optional[threading.Thread] = None
 _is_monitoring = threading.Event()
 _last_state: Optional[str] = None
 _last_event_time: float = 0.0
-EVENT_COOLDOWN = 1.0  # Seconds
 _gpio_initialized_by_this_module = False
 
 
@@ -136,21 +135,13 @@ def _reed_monitoring_loop(home_id: str, user_id: Optional[str]):
             current_door_state = "closed" if pin_is_low else "open"
 
             if current_door_state != _last_state:
-                current_time = time.time()
-                if (current_time - _last_event_time) >= EVENT_COOLDOWN:
-                    logger.info(
-                        f"[{DEVICE_NAME}] State change: {_last_state} -> {current_door_state}"
-                    )
-                    if current_door_state == "open":
-                        _on_door_opened_logic(home_id, user_id, _last_state)
-                    else:
-                        _on_door_closed_logic(home_id, _last_state)
-                    _last_event_time = current_time
+                logger.info(
+                    f"[{DEVICE_NAME}] State change: {_last_state} -> {current_door_state}"
+                )
+                if current_door_state == "open":
+                    _on_door_opened_logic(home_id, user_id, _last_state)
                 else:
-                    logger.debug(
-                        f"[{DEVICE_NAME}] State change from {_last_state} to {current_door_state} "
-                        f"suppressed due to cooldown. Last event: {_last_event_time:.2f}, Current: {current_time:.2f}"
-                    )
+                    _on_door_closed_logic(home_id, _last_state)
                 _last_state = current_door_state
             time.sleep(0.1)
     except Exception as e:
