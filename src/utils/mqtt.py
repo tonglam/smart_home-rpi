@@ -195,7 +195,7 @@ def _handle_automation_control_message(payload: dict) -> None:
                 f"[MQTT] Could not fetch user_id for HOME_ID '{home_id}'. Alerts may not be sent."
             )
 
-        # Handle movie mode
+        # Only handle movie mode for now
         if mode_id == "movie":
             logger.info(
                 f"[MQTT] Movie mode {'activated' if is_active else 'deactivated'} for home {home_id}"
@@ -203,14 +203,6 @@ def _handle_automation_control_message(payload: dict) -> None:
             if is_active:
                 set_light_intensity(home_id, 0.2)
                 logger.info("[MQTT] Turned on lights for movie mode to 20%")
-        # Handle away mode
-        elif mode_id == "away":
-            logger.info(
-                f"[MQTT] Away mode {'activated' if is_active else 'deactivated'} for home {home_id}"
-            )
-            if is_active:
-                turn_light_off(home_id)
-                logger.info("[MQTT] Turned off lights for away mode")
 
     except Exception as e:
         logger.error(f"[MQTT] Error handling automation control message: {e}")
