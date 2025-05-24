@@ -1,3 +1,32 @@
+"""
+Reed Switch Door Sensor Module
+
+This module manages a magnetic reed switch sensor for door state monitoring.
+It handles door open/close detection, maintains state, and generates appropriate
+alerts based on home security mode.
+
+Hardware Setup:
+    - Uses BCM GPIO pin 21
+    - Normally closed configuration (LOW when door closed)
+    - Pull-up resistor enabled
+    - Magnetic sensor mounted on door frame
+    - Magnet mounted on door
+
+States:
+    - open: Door is open (reed switch not in contact with magnet)
+    - closed: Door is closed (reed switch in contact with magnet)
+    - unknown: Initial state or error condition
+
+Events:
+    - door_changed: Generated when door state changes
+    - alert: Generated when door opens in away mode
+
+Dependencies:
+    - RPi.GPIO: For GPIO pin control
+    - threading: For concurrent monitoring
+    - database: For state persistence and event logging
+"""
+
 import threading
 import time
 from typing import Optional
@@ -34,7 +63,19 @@ _gpio_initialized_by_this_module = False
 def _on_door_opened_logic(
     home_id: str, user_id: Optional[str], old_state_from_loop: Optional[str]
 ):
-    """Handles logic when the door transitions to an open state."""
+    """Handles logic when the door transitions to an open state.
+
+    This function updates the device state, logs the event, and generates
+    security alerts if the home is in away mode.
+
+    Args:
+        home_id: The unique identifier for the home
+        user_id: Optional user ID for alert association
+        old_state_from_loop: Previous door state from monitoring loop
+
+    Raises:
+        Exception: If database operations fail
+    """
     logger.info(f"[{DEVICE_NAME}] Door opened detected.")
     update_device_state(DEVICE_ID, "open")
 
@@ -68,7 +109,17 @@ def _on_door_opened_logic(
 
 
 def _on_door_closed_logic(home_id: str, old_state_from_loop: Optional[str]):
-    """Handles logic when the door transitions to a closed state."""
+    """Handles logic when the door transitions to a closed state.
+
+    Updates device state and logs the state change event.
+
+    Args:
+        home_id: The unique identifier for the home
+        old_state_from_loop: Previous door state from monitoring loop
+
+    Raises:
+        Exception: If database operations fail
+    """
     logger.info(f"[{DEVICE_NAME}] Door closed detected.")
     update_device_state(DEVICE_ID, "closed")
 
@@ -88,7 +139,20 @@ def _on_door_closed_logic(home_id: str, old_state_from_loop: Optional[str]):
 
 
 def _reed_monitoring_loop(home_id: str, user_id: Optional[str]):
-    """Monitors the reed switch state by polling the GPIO pin using RPi.GPIO."""
+    """Monitors the reed switch state by polling the GPIO pin using RPi.GPIO.
+
+    This is the main monitoring loop that runs in a separate thread.
+    It continuously polls the GPIO pin and processes state changes.
+
+    Args:
+        home_id: The unique identifier for the home
+        user_id: Optional user ID for alert association
+
+    Note:
+        - Uses a polling interval of 0.1 seconds
+        - Automatically attempts to recover from GPIO errors
+        - Maintains state consistency with database
+    """
     global _last_state, _last_event_time
     logger.info(
         f"[{DEVICE_NAME}] Reed switch monitoring loop started for HOME_ID: {home_id}."
@@ -153,6 +217,24 @@ def _reed_monitoring_loop(home_id: str, user_id: Optional[str]):
 
 
 def start_reed_monitoring(home_id: str, user_id: Optional[str]) -> None:
+    """Start monitoring the reed switch for door state changes.
+
+    Initializes GPIO, sets up the monitoring thread, and ensures proper
+    device registration in the database.
+
+    Args:
+        home_id: The unique identifier for the home
+        user_id: Optional user ID for alert association
+
+    Raises:
+        RuntimeError: If GPIO initialization fails
+        Exception: If database operations fail
+
+    Note:
+        - Will not start if monitoring is already active
+        - Handles GPIO mode conflicts with other modules
+        - Ensures device state consistency on startup
+    """
     global _monitoring_thread, _is_monitoring, _last_state, _last_event_time, _gpio_initialized_by_this_module
 
     if _is_monitoring.is_set():
@@ -237,6 +319,16 @@ def start_reed_monitoring(home_id: str, user_id: Optional[str]) -> None:
 
 
 def stop_reed_monitoring() -> None:
+    """Stop reed switch monitoring and clean up resources.
+
+    Stops the monitoring thread and ensures proper cleanup of resources.
+    This function is idempotent and can be called multiple times safely.
+
+    Note:
+        - Waits up to 2 seconds for thread to finish
+        - Does not cleanup GPIO pins if initialized by another module
+        - Logs warning if thread doesn't finish in time
+    """
     global _is_monitoring, _monitoring_thread, _last_state, _gpio_initialized_by_this_module
     logger.info(f"[{DEVICE_NAME}] Stopping monitoring...")
     _is_monitoring.clear()

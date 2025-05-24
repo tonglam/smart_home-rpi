@@ -1,3 +1,48 @@
+"""
+MQTT Communication Module
+
+This module handles all MQTT communication for the Smart Home system.
+It manages the connection to the MQTT broker, handles message publishing
+and subscription, and processes various control messages.
+
+Connection Strategy:
+    - Uses TLS for secure communication (port 8883)
+    - Implements automatic reconnection
+    - Maintains QoS levels for different message types
+    - Handles connection failures gracefully
+
+Message Types:
+    1. Light Control:
+        - Topic: control/light
+        - States: on/off
+        - Optional: brightness (0-100%)
+
+    2. Device Control:
+        - Topic: control/device
+        - States: varies by device
+        - Includes device-specific parameters
+
+    3. Automation Control:
+        - Topic: control/automation
+        - Modes: movie, away, home
+        - States: active/inactive
+
+    4. Camera Control:
+        - Topic: control/camera
+        - States: online/offline
+        - Includes streaming parameters
+
+Dependencies:
+    - paho-mqtt: For MQTT protocol implementation
+    - dotenv: For configuration management
+    - database: For user and device state management
+
+Environment Variables:
+    - MQTT_BROKER_URL: MQTT broker address
+    - MQTT_USERNAME: Authentication username
+    - MQTT_PASSWORD: Authentication password
+"""
+
 import json
 import os
 
@@ -9,11 +54,13 @@ from src.utils.logger import logger
 
 load_dotenv()
 
+# MQTT Configuration
 MQTT_BROKER_URL = os.getenv("MQTT_BROKER_URL")
 MQTT_USERNAME = os.getenv("MQTT_USERNAME")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
-MQTT_PORT = 8883
+MQTT_PORT = 8883  # TLS port
 
+# Global client instance
 _mqtt_client_instance: mqtt.Client | None = None
 
 
@@ -24,7 +71,20 @@ def on_connect(
     rc: int,
     properties: mqtt.Properties | None = None,
 ) -> None:
-    """Callback for when the client receives a CONNACK response from the server."""
+    """Callback for when the client receives a CONNACK response from the server.
+
+    Args:
+        client: The client instance for this callback
+        userdata: The private user data as set in Client() or userdata_set()
+        flags: Response flags sent by the broker
+        rc: The connection result (0 = success)
+        properties: Properties for MQTT v5.0 (optional)
+
+    Note:
+        - Automatically subscribes to 'control' topic on successful connection
+        - Logs connection status and any subscription errors
+        - Called by paho-mqtt client internally
+    """
     if rc == 0:
         logger.info("Connected to MQTT Broker!")
         logger.info("Subscribing to 'control' topic with QoS 0...")
@@ -42,25 +102,38 @@ def on_connect(
 def _handle_light_control_message(payload: dict) -> None:
     """Handle light control messages from MQTT.
 
-    Expected payload formats:
-    1. On/Off control:
-    {
-        "homeId": "00:1A:22:33:44:55",
-        "type": "light",
-        "deviceId": "light_e5f6g7h8",
-        "state": "on"|"off",
-        "createdAt": "2025-05-16T18:34:28.140Z"
-    }
+    Processes messages for controlling smart lights, including:
+    - On/Off control
+    - Brightness adjustment
+    - State validation
 
-    2. Brightness control:
-    {
-        "homeId": "00:1A:22:33:44:55",
-        "type": "light",
-        "deviceId": "light_e5f6g7h8",
-        "state": "on",
-        "brightness": 0|25|100,
-        "createdAt": "2025-05-16T18:35:17.251Z"
-    }
+    Args:
+        payload: Dictionary containing the message payload
+
+    Expected payload formats:
+        1. On/Off control:
+        {
+            "homeId": "00:1A:22:33:44:55",
+            "type": "light",
+            "deviceId": "light_e5f6g7h8",
+            "state": "on"|"off",
+            "createdAt": "2025-05-16T18:34:28.140Z"
+        }
+
+        2. Brightness control:
+        {
+            "homeId": "00:1A:22:33:44:55",
+            "type": "light",
+            "deviceId": "light_e5f6g7h8",
+            "state": "on",
+            "brightness": 0|25|100,
+            "createdAt": "2025-05-16T18:35:17.251Z"
+        }
+
+    Note:
+        - Validates all required fields
+        - Maps brightness percentages to PWM values
+        - Handles errors gracefully
     """
     from src.sensors.light import set_light_intensity, turn_light_off, turn_light_on
 
@@ -122,15 +195,26 @@ def _handle_light_control_message(payload: dict) -> None:
 def _handle_device_control_message(payload: dict) -> None:
     """Handle device control messages from MQTT.
 
+    Processes general device control messages and routes them
+    to appropriate device handlers.
+
+    Args:
+        payload: Dictionary containing the message payload
+
     Expected payload format:
-    {
-        "home_id": "00:1A:22:33:44:55",
-        "type": "device",
-        "device_id": "light_01",
-        "state": "on",
-        "brightness": 50,
-        "created_at": "2025-05-16T18:39:59.196Z"
-    }
+        {
+            "home_id": "00:1A:22:33:44:55",
+            "type": "device",
+            "device_id": "light_01",
+            "state": "on",
+            "brightness": 50,
+            "created_at": "2025-05-16T18:39:59.196Z"
+        }
+
+    Note:
+        - Currently only handles light devices
+        - Validates required fields
+        - Extensible for other device types
     """
     from src.sensors.light import turn_light_off, turn_light_on
 
@@ -163,14 +247,25 @@ def _handle_device_control_message(payload: dict) -> None:
 def _handle_automation_control_message(payload: dict) -> None:
     """Handle automation control messages from MQTT.
 
+    Processes home automation mode changes and triggers
+    appropriate device actions.
+
+    Args:
+        payload: Dictionary containing the message payload
+
     Expected payload format:
-    {
-        "home_id": "00:1A:22:33:44:55",
-        "type": "automation",
-        "mode_id": "movie",
-        "active": true|false,
-        "created_at": "2025-05-16T18:39:59.196Z"
-    }
+        {
+            "home_id": "00:1A:22:33:44:55",
+            "type": "automation",
+            "mode_id": "movie",
+            "active": true|false,
+            "created_at": "2025-05-16T18:39:59.196Z"
+        }
+
+    Note:
+        - Currently supports movie mode
+        - Validates required fields
+        - Handles user association for alerts
     """
     from src.sensors.light import set_light_intensity, turn_light_off
 
@@ -211,14 +306,24 @@ def _handle_automation_control_message(payload: dict) -> None:
 def _handle_camera_control_message(payload: dict) -> None:
     """Handle camera control messages from MQTT.
 
+    Processes camera state changes and manages video streaming.
+
+    Args:
+        payload: Dictionary containing the message payload
+
     Expected payload format:
-    {
-        "homeId": "00:1A:2B:3C:4D:5E",
-        "type": "camera",
-        "deviceId": "camera_01",
-        "state": "online" | "offline",
-        "createdAt": "2025-05-19T16:48:47.667Z"
-    }
+        {
+            "homeId": "00:1A:2B:3C:4D:5E",
+            "type": "camera",
+            "deviceId": "camera_01",
+            "state": "online" | "offline",
+            "createdAt": "2025-05-19T16:48:47.667Z"
+        }
+
+    Note:
+        - Only handles camera_01 device
+        - Manages streaming start/stop
+        - Validates message format
     """
     from src.sensors.camera import start_camera_streaming, stop_camera_streaming
 
@@ -259,7 +364,20 @@ def _handle_camera_control_message(payload: dict) -> None:
 
 
 def on_message(client: mqtt.Client, userdata: any, msg: mqtt.MQTTMessage) -> None:
-    """Callback for when a PUBLISH message is received from the server."""
+    """Callback for when a PUBLISH message is received from the server.
+
+    Routes incoming messages to appropriate handlers based on payload type.
+
+    Args:
+        client: The client instance for this callback
+        userdata: The private user data as set in Client() or userdata_set()
+        msg: An instance of MQTTMessage containing topic and payload
+
+    Note:
+        - Decodes JSON payloads
+        - Routes to specific handlers based on type field
+        - Handles malformed messages gracefully
+    """
     logger.info(f"Received raw message on topic {msg.topic}: {msg.payload[:200]}...")
     try:
         payload_str = msg.payload.decode("utf-8")
@@ -303,7 +421,19 @@ def on_disconnect(
     rc: int,
     properties: mqtt.Properties | None = None,
 ) -> None:
-    """Callback for when the client disconnects."""
+    """Callback for when the client disconnects from the broker.
+
+    Args:
+        client: The client instance for this callback
+        userdata: The private user data as set in Client() or userdata_set()
+        flags: Response flags sent by the broker
+        rc: The disconnection result (0 = expected)
+        properties: Properties for MQTT v5.0 (optional)
+
+    Note:
+        - Logs unexpected disconnections
+        - Client will automatically attempt to reconnect
+    """
     logger.info(f"Disconnected from MQTT Broker with result code {rc}")
     if rc != 0:
         logger.warning(
@@ -312,8 +442,25 @@ def on_disconnect(
 
 
 def get_mqtt_client() -> mqtt.Client:
-    """Returns a singleton MQTT client instance.
-    Initializes, connects, and starts the client's loop on the first call.
+    """Get or create an MQTT client instance.
+
+    Creates a new MQTT client if none exists, or returns the existing one.
+    Handles all client setup including:
+    - TLS configuration
+    - Authentication
+    - Callback registration
+    - Connection establishment
+
+    Returns:
+        mqtt.Client: Configured MQTT client instance
+
+    Raises:
+        RuntimeError: If connection fails or configuration is invalid
+
+    Note:
+        - Uses singleton pattern
+        - Configures TLS for secure communication
+        - Sets up automatic reconnection
     """
     global _mqtt_client_instance
 
@@ -367,9 +514,16 @@ def get_mqtt_client() -> mqtt.Client:
 def publish_string(
     topic: str, payload: str, qos: int = 0, retain: bool = False
 ) -> None:
-    """Publishes a pre-formatted string message to an MQTT topic.
-    Useful for base64 strings or already JSON-stringified messages.
-    All messages default to QoS 0.
+    """Publish a string message to an MQTT topic.
+
+    Args:
+        topic: The topic to publish to
+        payload: The string message to publish
+        qos: Quality of Service level (0-2)
+        retain: Whether to retain the message
+
+    Raises:
+        RuntimeError: If client is not connected
     """
     client = get_mqtt_client()
     if not client.is_connected():
@@ -387,7 +541,16 @@ def publish_string(
 
 
 def subscribe_to_topic(client: mqtt.Client, topic: str, qos: int = 0) -> None:
-    """Subscribes the client to a given topic. Defaults to QoS 0."""
+    """Subscribe to an MQTT topic.
+
+    Args:
+        client: MQTT client instance
+        topic: Topic to subscribe to
+        qos: Quality of Service level (0-2)
+
+    Raises:
+        RuntimeError: If subscription fails
+    """
     if not client.is_connected():
         logger.warning(
             "MQTT client is not connected. Cannot subscribe now. Will attempt on (re)connect if configured in on_connect."
@@ -405,7 +568,18 @@ def subscribe_to_topic(client: mqtt.Client, topic: str, qos: int = 0) -> None:
 def publish_frame(
     topic: str, image_bytes: bytes, qos: int = 0, retain: bool = False
 ) -> None:
-    """Publish raw image bytes (e.g., JPEG) to an MQTT topic. Defaults to QoS 0."""
+    """Publish a video frame as bytes to an MQTT topic.
+
+    Args:
+        topic: The topic to publish to
+        image_bytes: The frame data as bytes
+        qos: Quality of Service level (0-2)
+        retain: Whether to retain the message
+
+    Note:
+        - Optimized for video streaming
+        - Does not encode/decode frames
+    """
     client = get_mqtt_client()
     if not client.is_connected():
         logger.warning("MQTT client is not connected. Cannot publish frame.")
@@ -421,7 +595,18 @@ def publish_frame(
 def publish_json(
     topic: str, message_dict: dict, qos: int = 0, retain: bool = False
 ) -> None:
-    """Publish a dictionary as a JSON message to an MQTT topic. Defaults to QoS 0."""
+    """Publish a dictionary as JSON to an MQTT topic.
+
+    Args:
+        topic: The topic to publish to
+        message_dict: The dictionary to publish as JSON
+        qos: Quality of Service level (0-2)
+        retain: Whether to retain the message
+
+    Raises:
+        RuntimeError: If client is not connected
+        JSONEncodeError: If dictionary cannot be serialized
+    """
     client = get_mqtt_client()
     try:
         json_payload = json.dumps(message_dict)

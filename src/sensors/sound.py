@@ -1,3 +1,35 @@
+"""
+Sound Detection Sensor Module
+
+This module manages a sound detection sensor for monitoring audio events.
+It includes debouncing logic, health monitoring, and state management.
+
+Hardware Setup:
+    - Uses BCM GPIO pin 20
+    - Digital output (HIGH when sound detected)
+    - Adjustable sensitivity via onboard potentiometer
+    - 3.3V operating voltage
+    - Built-in amplifier and comparator
+
+States:
+    - idle: No sound detected
+    - detected: Sound event detected
+    - disconnected: Sensor not responding
+
+Events:
+    - sound_changed: Generated when sound is detected in away mode
+    - sensor_changed: Generated when sensor state changes (e.g., disconnection)
+
+Configuration:
+    - DETECTION_COOLDOWN: Time between detections (600s)
+    - HEALTH_CHECK_INTERVAL: Sensor health check frequency (30s)
+
+Dependencies:
+    - gpiozero: For GPIO pin control
+    - threading: For concurrent monitoring
+    - database: For state persistence and event logging
+"""
+
 import threading
 import time
 from typing import Optional
@@ -13,19 +45,23 @@ from src.utils.database import (
 )
 from src.utils.logger import logger
 
+# Device configuration
 DEVICE_ID = "sound_sensor_01"
 DEVICE_NAME = "Sound Sensor"
 DEVICE_TYPE = "sound_sensor"
 
-GPIO_PIN_SOUND = 20
+# GPIO configuration
+GPIO_PIN_SOUND = 20  # BCM pin number
 
-# Global state
+# Global state management
 _sound_sensor: Optional[InputDevice] = None
 _monitoring_thread: Optional[threading.Thread] = None
 _is_monitoring = threading.Event()
 _last_detection_time = 0
 _last_health_check_time = 0
-DETECTION_COOLDOWN = 600.0  # 1 minute cooldown between detections
+
+# Configuration constants
+DETECTION_COOLDOWN = 600.0  # 10 minutes cooldown between detections
 HEALTH_CHECK_INTERVAL = 30.0  # Check sensor health every 30 seconds
 
 

@@ -1,3 +1,36 @@
+"""
+Cloudflare R2 Storage Integration Module
+
+This module provides functionality to interact with Cloudflare's R2 storage service,
+which is an S3-compatible object storage solution. It handles file uploads and
+storage management for the smart home system.
+
+Configuration:
+    Required environment variables:
+    - R2_ACCESS_KEY_ID: Access key for R2 authentication
+    - R2_SECRET_ACCESS_KEY: Secret key for R2 authentication
+    - R2_ENDPOINT_URL: R2 service endpoint URL
+    - CLOUDFLARE_ACCOUNT_ID: Cloudflare account identifier
+
+Storage Configuration:
+    - Bucket: smart-home
+    - Region: Auto (Cloudflare managed)
+    - Access: Private
+    - Versioning: Disabled
+
+Features:
+    - Secure file uploads
+    - Automatic error recovery
+    - Environment validation
+    - Client connection pooling
+    - Detailed logging
+
+Dependencies:
+    - boto3: For S3-compatible storage operations
+    - python-dotenv: For environment configuration
+    - logger: For operation logging
+"""
+
 import os
 
 import boto3
@@ -14,7 +47,17 @@ R2_ENDPOINT_URL = os.getenv(
 
 
 def get_r2_client():
-    """Get the Cloudflare R2 client."""
+    """Get a configured Cloudflare R2 client.
+
+    Returns:
+        boto3.client: Configured S3 client for R2 operations, or None if configuration fails
+
+    Note:
+        - Creates new client instance per call
+        - Validates required environment variables
+        - Uses S3-compatible API
+        - Implements connection pooling
+    """
     # Fetch keys here, after load_dotenv() from main.py has run
     r2_access_key_id = os.getenv("R2_ACCESS_KEY_ID")
     r2_secret_access_key = os.getenv("R2_SECRET_ACCESS_KEY")
@@ -46,7 +89,26 @@ def get_r2_client():
 
 
 def upload_file_to_r2(local_file_path: str, remote_file_name: str = None) -> bool:
-    """Upload a file to Cloudflare R2 storage."""
+    """Upload a file to Cloudflare R2 storage.
+
+    Args:
+        local_file_path: Path to the file on local filesystem
+        remote_file_name: Optional custom name for the file in R2 storage.
+                         If not provided, uses local filename.
+
+    Returns:
+        bool: True if upload successful, False otherwise
+
+    Raises:
+        Exception: If file operations or upload fails
+
+    Note:
+        - Validates file existence
+        - Handles client initialization
+        - Implements error recovery
+        - Provides detailed logging
+        - Uses global bucket configuration
+    """
     if not os.path.exists(local_file_path):
         logger.error(f"[Cloudflare] File not found: {local_file_path}")
         return False

@@ -1,3 +1,43 @@
+"""
+Camera Module for Video Streaming
+
+This module manages a Raspberry Pi camera for video streaming and motion detection.
+It provides real-time video streaming over MQTT and can detect motion events
+in the video stream.
+
+Hardware Setup:
+    - Raspberry Pi Camera Module v2
+    - Resolution: 1280x720 (720p)
+    - Framerate: 30 fps
+    - Auto white balance
+    - Auto exposure
+
+Features:
+    - Live video streaming over MQTT
+    - Motion detection
+    - Frame compression
+    - Automatic exposure control
+    - Error recovery
+    - Resource management
+
+States:
+    - streaming: Camera is actively streaming
+    - stopped: Camera is not streaming
+    - error: Hardware/streaming error
+
+Events:
+    - motion_detected: When motion is detected
+    - stream_started: When streaming begins
+    - stream_stopped: When streaming ends
+    - error: When camera errors occur
+
+Dependencies:
+    - picamera2: For camera control
+    - opencv-python: For image processing
+    - numpy: For frame manipulation
+    - mqtt: For video streaming
+"""
+
 import base64
 import io
 import os
@@ -7,9 +47,11 @@ import time
 from datetime import datetime, timezone
 from typing import Optional
 
+import cv2
 import numpy as np
 from picamera2 import Picamera2
-from picamera2.encoders import H264Encoder
+from picamera2.encoders import H264Encoder, JpegEncoder
+from picamera2.outputs import FileOutput
 from PIL import Image
 
 from src.utils.cloudflare import upload_file_to_r2
@@ -20,12 +62,12 @@ from src.utils.database import (
     update_device_state,
 )
 from src.utils.logger import logger
-from src.utils.mqtt import get_mqtt_client, publish_json
+from src.utils.mqtt import get_mqtt_client, publish_frame, publish_json
 
 # Device configuration
 DEVICE_ID = "camera_01"
 DEVICE_NAME = "Security Camera"
-DEVICE_TYPE = "camera"
+DEVICE_TYPE = "pi_camera"
 
 # Camera configuration
 FRAME_WIDTH = 640
@@ -42,6 +84,8 @@ MQTT_CAMERA_LIVE_TOPIC = f"camera/{DEVICE_ID}/live"
 _picamera_object: Optional[Picamera2] = None
 _camera_thread: Optional[threading.Thread] = None
 _is_running = threading.Event()
+_last_motion_time = 0.0
+_last_frame = None
 
 
 def _setup_camera() -> bool:

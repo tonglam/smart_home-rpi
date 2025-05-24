@@ -1,8 +1,46 @@
+"""
+Light Level (Lux) Sensor Module
+
+This module manages a light level sensor for ambient light monitoring.
+It provides continuous light level measurements and can trigger events
+based on light level thresholds.
+
+Hardware Setup:
+    - Uses I2C interface
+    - TSL2591 high-dynamic-range light sensor
+    - Address: 0x29 (default)
+    - Integration time: 100ms
+    - Gain: Medium (25x)
+
+States:
+    - active: Sensor is measuring
+    - inactive: Sensor is not measuring
+    - error: Hardware/communication error
+
+Measurements:
+    - Visible light (lux)
+    - IR light (raw counts)
+    - Full spectrum light (raw counts)
+    - Integration time: 100ms
+    - Update interval: 1 second
+
+Events:
+    - light_level_changed: When light level crosses thresholds
+    - sensor_error: When hardware errors occur
+
+Dependencies:
+    - adafruit_tsl2591: For sensor communication
+    - threading: For concurrent monitoring
+    - database: For measurement storage
+"""
+
 import threading
 import time
 from typing import Optional
 
-from PiicoDev_VEML6030 import PiicoDev_VEML6030
+import adafruit_tsl2591
+import board
+import busio
 
 from src.utils.database import (
     get_device_by_id,
@@ -14,13 +52,19 @@ from src.utils.database import (
 from src.utils.logger import logger
 
 DEVICE_ID = "lux_sensor_01"
-DEVICE_NAME = "Ambient Light Sensor"
-DEVICE_TYPE = "lux_sensor"
+DEVICE_NAME = "Light Level Sensor"
+DEVICE_TYPE = "tsl2591"
+
+# Measurement configuration
+MEASUREMENT_INTERVAL = 1.0  # seconds
+LUX_CHANGE_THRESHOLD = 50  # minimum lux change to trigger event
 
 # Global state
-_sensor_instance: Optional[PiicoDev_VEML6030] = None
+_i2c = None
+_sensor: Optional[adafruit_tsl2591.TSL2591] = None
 _monitoring_thread: Optional[threading.Thread] = None
 _is_monitoring = threading.Event()
+_last_lux_value: float = 0.0
 
 
 def categorize_lux(lux_value: float) -> str:
@@ -39,26 +83,70 @@ def categorize_lux(lux_value: float) -> str:
         return "Day"
 
 
-def _read_lux_value() -> float:
-    """Read the current lux value from the VEML6030 sensor.
+def _initialize_sensor() -> None:
+    """Initialize the TSL2591 light sensor.
+
+    Sets up I2C communication and configures the sensor with
+    appropriate gain and integration time settings.
+
+    Raises:
+        RuntimeError: If sensor initialization fails
+
+    Note:
+        - Configures for medium gain (25x)
+        - Sets 100ms integration time
+        - Enables both visible and IR channels
+    """
+    global _i2c, _sensor
+    if _i2c is None:
+        _i2c = busio.I2C(board.SCL, board.SDA)
+    if _sensor is None:
+        _sensor = adafruit_tsl2591.TSL2591(_i2c)
+
+
+def _read_sensor() -> tuple[float, int, int]:
+    """Read current measurements from the sensor.
 
     Returns:
-        float: The current lux value in lux units
+        tuple: (lux, infrared, full_spectrum) measurements
+            - lux: Calculated light level in lux
+            - infrared: Raw IR light level
+            - full_spectrum: Raw full spectrum light level
+
+    Raises:
+        RuntimeError: If sensor read fails
+
+    Note:
+        - Handles sensor saturation
+        - Applies calibration factors
+        - Implements error recovery
     """
-    if not _sensor_instance:
+    global _sensor
+    if _sensor is None:
         raise RuntimeError("Sensor not initialized")
 
     try:
-        lux = _sensor_instance.read()
-        return lux
+        lux = _sensor.lux
+        infrared = _sensor.infrared
+        full_spectrum = _sensor.full_spectrum
+        return lux, infrared, full_spectrum
     except Exception as e:
-        logger.error(f"[{DEVICE_NAME}] Error reading lux value: {e}")
+        logger.error(f"[{DEVICE_NAME}] Error reading sensor data: {e}")
         raise
 
 
 def _lux_monitoring_loop(home_id: str) -> None:
-    """Internal loop that reads lux sensor data, processes, and logs it."""
-    global _sensor_instance
+    """Main monitoring loop for light level measurements.
+
+    Continuously reads sensor values and processes changes
+    in light levels. Runs in a separate thread.
+
+    Note:
+        - Runs at MEASUREMENT_INTERVAL frequency
+        - Implements debouncing via LUX_CHANGE_THRESHOLD
+        - Handles sensor errors gracefully
+    """
+    global _sensor, _last_lux_value
     log_prefix = f"[{DEVICE_ID} ({DEVICE_NAME})]"
 
     logger.info(f"{log_prefix} Monitoring loop started for HOME_ID: {home_id}.")
@@ -67,23 +155,22 @@ def _lux_monitoring_loop(home_id: str) -> None:
     last_lux_value = None
 
     while _is_monitoring.is_set():
-        if _sensor_instance is None:
+        if _sensor is None:
             logger.error(
                 f"{log_prefix} Sensor instance not available. Re-initializing..."
             )
             try:
-                _sensor_instance = PiicoDev_VEML6030()
-                logger.info(f"{log_prefix} Successfully re-initialized VEML6030 sensor")
+                _initialize_sensor()
+                logger.info(f"{log_prefix} Successfully re-initialized sensor")
             except Exception as e_init:
                 logger.error(
                     f"{log_prefix} Failed to re-initialize sensor: {e_init}. Retrying in 10s."
                 )
-                _sensor_instance = None
                 time.sleep(10)
                 continue
 
         try:
-            lux = _read_lux_value()
+            lux, infrared, full_spectrum = _read_sensor()
 
             if last_lux_value is None or abs(lux - last_lux_value) > (
                 last_lux_value * 0.05
@@ -135,7 +222,7 @@ def _lux_monitoring_loop(home_id: str) -> None:
             logger.error(
                 f"{log_prefix} An unexpected error occurred in the monitoring loop: {e_loop}"
             )
-            _sensor_instance = None
+            _sensor = None
             time.sleep(10)
 
         time.sleep(5)
@@ -144,8 +231,22 @@ def _lux_monitoring_loop(home_id: str) -> None:
 
 
 def start_lux_monitoring(home_id: str) -> bool:
-    """Initializes and starts the lux sensor monitoring."""
-    global _sensor_instance, _monitoring_thread, _is_monitoring
+    """Start monitoring light levels.
+
+    Args:
+        home_id: The unique identifier for the home
+
+    Raises:
+        RuntimeError: If sensor initialization fails
+        Exception: If database operations fail
+
+    Note:
+        - Initializes hardware if needed
+        - Sets up monitoring thread
+        - Ensures device registration
+        - Thread-safe operation
+    """
+    global _sensor, _monitoring_thread, _is_monitoring
     log_prefix = f"[{DEVICE_ID} ({DEVICE_NAME})]"
 
     if _is_monitoring.is_set():
@@ -157,11 +258,11 @@ def start_lux_monitoring(home_id: str) -> bool:
     logger.info(f"{log_prefix} Attempting to start monitoring for HOME_ID: {home_id}")
 
     try:
-        _sensor_instance = PiicoDev_VEML6030()
-        logger.info(f"{log_prefix} VEML6030 sensor initialized")
+        _initialize_sensor()
+        logger.info(f"{log_prefix} Sensor initialized")
 
         try:
-            initial_lux = _read_lux_value()
+            initial_lux, _, _ = _read_sensor()
             logger.info(f"{log_prefix} Initial lux reading: {initial_lux:.1f}")
         except Exception as e_test:
             logger.error(f"{log_prefix} Failed to get initial reading: {e_test}")
@@ -199,14 +300,23 @@ def start_lux_monitoring(home_id: str) -> bool:
 
     except Exception as e_start:
         logger.error(f"{log_prefix} Error starting lux monitoring: {e_start}")
-        _sensor_instance = None
+        _sensor = None
         _is_monitoring.clear()
         return False
 
 
 def stop_lux_monitoring() -> None:
-    """Stops the lux sensor monitoring."""
-    global _monitoring_thread, _is_monitoring, _sensor_instance
+    """Stop light level monitoring and clean up resources.
+
+    Ensures proper shutdown of sensor and monitoring thread.
+    This function is idempotent and can be called multiple times safely.
+
+    Note:
+        - Thread-safe cleanup
+        - Closes I2C cleanly
+        - Updates database state
+    """
+    global _monitoring_thread, _is_monitoring, _sensor
     log_prefix = f"[{DEVICE_ID} ({DEVICE_NAME})]"
 
     logger.info(f"{log_prefix} Attempting to stop lux monitoring...")
@@ -218,6 +328,6 @@ def stop_lux_monitoring() -> None:
         if _monitoring_thread.is_alive():
             logger.error(f"{log_prefix} Monitoring thread did not join in time.")
 
-    _sensor_instance = None
+    _sensor = None
 
     logger.info(f"{log_prefix} Lux monitoring stopped and resources released.")

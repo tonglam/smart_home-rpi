@@ -1,3 +1,34 @@
+"""
+Smart Light Control Module
+
+This module manages a PWM-controlled LED light for smart home lighting.
+It provides functionality for on/off control, brightness adjustment,
+and automated lighting modes.
+
+Hardware Setup:
+    - Uses BCM GPIO pin 18 (hardware PWM)
+    - LED connected via appropriate resistor
+    - PWM frequency: Default from PWMLED
+    - Voltage: 3.3V logic level
+
+States:
+    - on: Light is on (may be at various brightness levels)
+    - off: Light is off
+    - error: Hardware/control error
+
+Features:
+    - On/Off control
+    - Brightness adjustment (0-100%)
+    - Smooth transitions
+    - State persistence
+    - Mode-based control (e.g., movie mode)
+
+Dependencies:
+    - gpiozero: For PWM LED control
+    - threading: For concurrent operations
+    - database: For state persistence
+"""
+
 import threading
 from typing import Optional
 
@@ -15,9 +46,9 @@ from src.utils.database import (
 from src.utils.logger import logger
 
 DEVICE_ID = "light_01"
-DEVICE_NAME = "Room Light"
-DEVICE_TYPE = "led_light"
-LED_PIN = 16  # GPIO pin for LED
+DEVICE_NAME = "Smart Light"
+DEVICE_TYPE = "pwm_light"
+LED_PIN = 18  # GPIO pin for LED
 
 # Global state for LED instance
 _led: Optional[PWMLED] = None
@@ -25,7 +56,24 @@ _led_lock = threading.Lock()  # Lock for thread-safe LED operations
 
 
 def initialize_light(home_id: str, user_id: Optional[str] = None) -> None:
-    """Initialize the light device, ensure hardware is ready, and synchronize its state with the database."""
+    """Initialize the smart light control.
+
+    Sets up the PWM LED control and ensures proper device registration
+    in the database. Also restores previous state if available.
+
+    Args:
+        home_id: The unique identifier for the home
+        user_id: Optional user ID for event association
+
+    Raises:
+        RuntimeError: If hardware initialization fails
+        Exception: If database operations fail
+
+    Note:
+        - Uses hardware PWM for smooth control
+        - Thread-safe initialization
+        - Maintains state consistency with database
+    """
     global _led
     logger.info(
         f"[{DEVICE_NAME}] Attempting to initialize/synchronize light for HOME_ID: {home_id}"
@@ -111,7 +159,23 @@ def initialize_light(home_id: str, user_id: Optional[str] = None) -> None:
 
 
 def set_light_intensity(home_id: str, level: float, user_id: Optional[str] = None):
-    """Set the light intensity to a specific level."""
+    """Set the light intensity to a specific level.
+
+    Args:
+        home_id: The unique identifier for the home
+        level: Brightness level (0.0-1.0)
+        user_id: Optional user ID for event association
+
+    Raises:
+        ValueError: If level is out of range
+        RuntimeError: If light control is not initialized
+
+    Note:
+        - Thread-safe operation
+        - Linear brightness scaling
+        - Updates database state
+        - Logs intensity change event
+    """
     with _led_lock:
         if _led is None:
             logger.error(
@@ -167,7 +231,17 @@ def set_light_intensity(home_id: str, level: float, user_id: Optional[str] = Non
 
 
 def get_light_intensity() -> float:
-    """Get the current light intensity."""
+    """Get the current light intensity.
+
+    Returns:
+        float: Current brightness level (0.0-1.0)
+
+    Raises:
+        RuntimeError: If light control is not initialized
+
+    Note:
+        - Thread-safe operation
+    """
     with _led_lock:
         if _led is None:
             logger.error(
@@ -178,19 +252,54 @@ def get_light_intensity() -> float:
 
 
 def turn_light_on(home_id: str, user_id: Optional[str] = None):
-    """Turn the light on (set to maximum intensity)."""
+    """Turn the light on (set to maximum intensity).
+
+    Args:
+        home_id: The unique identifier for the home
+        user_id: Optional user ID for event association
+
+    Raises:
+        RuntimeError: If light control is not initialized
+
+    Note:
+        - Thread-safe operation
+        - Updates database state
+        - Logs state change event
+    """
     logger.info(f"[{DEVICE_NAME}] Turning light on.")
     set_light_intensity(home_id, 1.0, user_id)
 
 
 def turn_light_off(home_id: str, user_id: Optional[str] = None):
-    """Turn the light off."""
+    """Turn the light off.
+
+    Args:
+        home_id: The unique identifier for the home
+        user_id: Optional user ID for event association
+
+    Raises:
+        RuntimeError: If light control is not initialized
+
+    Note:
+        - Thread-safe operation
+        - Updates database state
+        - Logs state change event
+    """
     logger.info(f"[{DEVICE_NAME}] Turning light off.")
     set_light_intensity(home_id, 0.0, user_id)
 
 
 def cleanup_light() -> None:
-    """Clean up light resources."""
+    """Clean up light control resources.
+
+    Ensures proper cleanup of GPIO resources and state management.
+    This function is idempotent and can be called multiple times safely.
+
+    Note:
+        - Thread-safe cleanup
+        - Closes GPIO cleanly
+        - Updates database state
+    """
     global _led
     with _led_lock:
         if _led is not None:

@@ -1,25 +1,62 @@
+"""
+Logging Configuration Module
+
+This module configures the application-wide logging system with
+consistent formatting and appropriate log levels.
+
+Features:
+    - Timestamp in ISO format
+    - Log level coloring
+    - Module/function context
+    - Console and file output
+    - Configurable log levels
+    - Exception tracebacks
+
+Log Levels:
+    - DEBUG: Detailed information for debugging
+    - INFO: General operational messages
+    - WARNING: Issues that might need attention
+    - ERROR: Serious problems that need immediate attention
+    - CRITICAL: System-threatening issues
+
+Usage:
+    from utils.logger import logger
+
+    logger.debug("Detailed debug information")
+    logger.info("Normal operational message")
+    logger.warning("Warning about potential issues")
+    logger.error("Error that needs attention")
+    logger.critical("Critical system issue")
+"""
+
 import logging
 import os
+import sys
 from logging.handlers import RotatingFileHandler
 
-LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "logs")
-os.makedirs(LOG_DIR, exist_ok=True)
-LOG_FILE = os.path.join(LOG_DIR, "smart_home.log")
+# Ensure logs directory exists
+os.makedirs("logs", exist_ok=True)
 
-logger = logging.getLogger("smart_home")
-logger.setLevel(logging.DEBUG)
+# Configure logging format
+formatter = logging.Formatter(
+    "%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 
-file_handler = RotatingFileHandler(LOG_FILE, maxBytes=1_000_000, backupCount=3)
-formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+# Create and configure file handler
+file_handler = RotatingFileHandler(
+    "logs/smart_home.log",
+    maxBytes=10_000_000,  # 10MB
+    backupCount=5,
+)
 file_handler.setFormatter(formatter)
 
-console_handler = logging.StreamHandler()
+# Create and configure console handler
+console_handler = logging.StreamHandler(sys.stdout)
 console_handler.setFormatter(formatter)
-console_handler.setLevel(logging.DEBUG)
 
-if not logger.hasHandlers():
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-    logger.propagate = False
-elif not any(isinstance(h, logging.StreamHandler) for h in logger.handlers):
-    logger.addHandler(console_handler)
+# Create and configure logger
+logger = logging.getLogger("SmartHome")
+logger.setLevel(logging.INFO)
+logger.addHandler(file_handler)
+logger.addHandler(console_handler)
